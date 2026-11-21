@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Programas | EMC Academy</title>
+  <meta name="description" content="Catálogo de cursos de EMC Academy: Python, Inteligencia Artificial, Ciberseguridad y Kids & Teens.">
+  <link rel="icon" type="image/jpeg" href="assets/img/isotipo.jpeg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="programas" data-root="">
+<main id="main">
+  <section class="page-hero">
+    <div class="container">
+      <nav class="breadcrumb" aria-label="Ruta"><a href="index.html">Inicio</a><span>/</span><span>Programas</span></nav>
+      <span class="eyebrow">Catálogo</span>
+      <h1>Programas</h1>
+      <p class="lead">Todos nuestros cursos duran 32 horas (16 clases de 2 h, dos por semana), son online en vivo y cuestan S/ 450 en un solo pago.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <form class="catalog-tools" id="catalog-form" role="search">
+        <div class="chips" role="group" aria-label="Filtrar por área">
+          <button type="button" class="chip" data-area="todos" aria-pressed="true">Todos</button>
+          <button type="button" class="chip" data-area="programacion" aria-pressed="false">Programación</button>
+          <button type="button" class="chip" data-area="ia" aria-pressed="false">Inteligencia Artificial</button>
+          <button type="button" class="chip" data-area="ciberseguridad" aria-pressed="false">Ciberseguridad</button>
+          <button type="button" class="chip" data-area="kids" aria-pressed="false">Kids &amp; Teens</button>
+        </div>
+        <div class="catalog-search">
+          <div class="search-field">
+            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+            <input type="search" id="catalog-search" placeholder="Buscar curso…" aria-label="Buscar curso">
+          </div>
+          <span class="catalog-count" id="catalog-count" aria-live="polite"></span>
+        </div>
+      </form>
+      <div class="grid grid-3" id="catalog-grid"></div>
+    </div>
+  </section>
+</main>
+<script src="js/data.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

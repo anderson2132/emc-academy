@@ -7,8 +7,15 @@
 // (p. ej. https://api.{dominio}). Sin API configurada, el campus muestra "próximamente".
 const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 const IS_PROD_DOMAIN = /(^|\.)emcacademy\.pe$/.test(location.hostname);
+// TEMPORAL hasta tener emcacademy.pe: frontend en GitHub Pages + API en Railway (sitios distintos;
+// el login no funciona en Safari, que bloquea cookies entre sitios).
+const IS_GITHUB_PAGES = location.hostname === 'anderson2132.github.io';
+const RAILWAY_API = 'https://api-production-b6e1d251.up.railway.app';
 const API_BASE = window.EMC_API_BASE ||
-  (IS_LOCAL ? `http://${location.hostname}:3000` : IS_PROD_DOMAIN ? 'https://api.emcacademy.pe' : null);
+  (IS_LOCAL ? `http://${location.hostname}:3000`
+    : IS_PROD_DOMAIN ? 'https://api.emcacademy.pe'
+    : IS_GITHUB_PAGES ? RAILWAY_API
+    : null);
 
 const NO_REFRESH = new Set(['/auth/login', '/auth/refresh', '/auth/logout', '/auth/register']);
 

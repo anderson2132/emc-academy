@@ -177,7 +177,7 @@ Costo asociado: el tráfico de video sale de Railway (~350 GB/mes ≈ US$ 15–2
 | Tema | Medida |
 |---|---|
 | Transporte | HTTPS obligatorio (Pages y Railway con TLS), HSTS |
-| Contraseñas | Argon2id; política mínima de 10 caracteres; bloqueo progresivo tras intentos fallidos |
+| Contraseñas | Argon2id; política mínima de 8 caracteres; bloqueo progresivo tras intentos fallidos |
 | Sesión | Access token JWT 15 min + refresh token rotativo (hash en BD, revocable) en **cookies httpOnly, Secure, SameSite=Lax, Domain=.{dominio}** |
 | CSRF | SameSite=Lax + verificación de `Origin` en peticiones que modifican datos |
 | CORS | Solo `https://www.{dominio}` con credenciales |

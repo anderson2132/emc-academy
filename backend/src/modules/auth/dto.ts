@@ -1,6 +1,6 @@
 import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 
-const PASSWORD_MIN = 10;
+const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 128;
 
 export class RegisterDto {

@@ -101,7 +101,7 @@ async function seedAdmin() {
     console.log('  · ADMIN_EMAIL / ADMIN_PASSWORD no definidos: no se crea administrador');
     return;
   }
-  if (password.length < 10) throw new Error('ADMIN_PASSWORD debe tener al menos 10 caracteres');
+  if (password.length < 8) throw new Error('ADMIN_PASSWORD debe tener al menos 8 caracteres');
 
   const existing = await prisma.user.findUnique({ where: { email } });
   const user = existing ?? await prisma.user.create({

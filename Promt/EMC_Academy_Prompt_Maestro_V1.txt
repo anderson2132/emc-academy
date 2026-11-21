@@ -1,0 +1,93 @@
+PROYECTO EMC ACADEMY — PROMPT MAESTRO CONSOLIDADO V1.0
+Portal institucional + Campus Virtual | Arquitectura y construcción técnica
+
+ROL DEL AGENTE
+Actúa como un equipo de arquitectura de soluciones AWS, arquitectura de software, seguridad, UX/UI, desarrollo full stack, PostgreSQL y DevOps. Diseña, documenta, implementa y prueba una plataforma académica real, modular, segura, accesible y escalable. Primero entrega arquitectura y prototipos para aprobación; después implementa por etapas. No inventes credenciales, dominios ni infraestructura existente.
+
+1. CONTEXTO Y OBJETIVO
+EMC Academy ofrece formación tecnológica práctica online en vivo para estudiantes, profesionales y niños/adolescentes (Kids & Teens). Cursos: SQL, programación, Python, IA, ciberseguridad, Data Analytics; Kids & Teens nivel 1 Scratch, nivel 2 GDevelop, nivel 3 Python + Pygame. Las clases se imparten por Zoom y pueden grabarse.
+Construir dos entornos integrados: (a) portal institucional público para difusión, búsqueda, inscripciones y captación; (b) campus virtual privado para alumnos, docentes, administradores y apoderados. Mantener una identidad académica y corporativa coherente.
+
+2. REFERENCIAS VISUALES OBLIGATORIAS
+Identidad visual: https://www.emcinnovate.com/
+Referencia de estructura institucional y navegación: https://www.tecsup.edu.pe/
+Analiza ambos sitios antes de implementar. De EMC INNOVATE extrae colores HEX reales, tipografía, botones, fondos, espaciado, tarjetas, encabezados, iconografía y responsive. De TECSUP toma como referencia conceptual la organización del catálogo, menús, banners, búsqueda, oferta académica y accesos estudiantiles. No copies código, textos, imágenes ni elementos protegidos. Si no puedes inspeccionar los estilos, solicita capturas o CSS; no inventes colores exactos.
+Crear un Design System compartido: tokens de color/tipografía/espaciado, Button, Input, Select, Modal, Card, Badge, Table, Navbar, Sidebar, CourseCard, ProgressBar, AttendanceStatus, VideoPlayer, Calendar y NotificationPanel. Identidad EMC Academy: azul marino/cyan/blanco, ajustados a valores corporativos verificados.
+
+3. PORTAL INSTITUCIONAL
+Página principal en este orden: header, menú, hero/banner, buscador de cursos, categorías, programas destacados, próximos inicios, metodología, beneficios, docentes, Kids & Teens, preguntas frecuentes, contacto/inscripción y footer.
+Menú: Inicio, Nosotros, Programas (Programación, SQL/Bases de Datos, Ciberseguridad, IA, Data Analytics), Kids & Teens (Scratch, GDevelop, Python+Pygame), Próximos inicios, Contacto, Campus Virtual.
+Catálogo dinámico con imagen, categoría, título, resumen, duración, modalidad, inicio, estado de inscripción, Ver programa e Inscribirme.
+Página de programa: objetivo, público, requisitos, duración, modalidad, horarios, inicio, temario, metodología, docente, certificado, precio cuando corresponda, FAQ e inscripción.
+Formulario de interesados: nombres, apellidos, email, celular, curso, datos del apoderado para menores, consentimiento y términos. Guardar solicitudes en BD y mostrarlas al administrador.
+Rutas sugeridas: /, /nosotros, /programas, /programas/[slug], /kids-teens, /proximos-inicios, /inscripciones, /contacto, /campus/login, /campus/alumno, /campus/docente, /campus/apoderado, /campus/admin.
+Diseño responsive, SEO y accesibilidad.
+
+4. PERFILES Y PERMISOS
+ADMINISTRADOR: aprobar/rechazar/suspender/reactivar usuarios; gestionar estudiantes, apoderados, docentes, cursos, módulos, grupos, matrículas, sesiones, videos, materiales, asistencia, tareas, pagos manuales, notificaciones, reportes y auditoría.
+DOCENTE: gestionar solamente sus grupos, sesiones, enlaces Zoom, asistencia, materiales, grabaciones, tareas, revisión de entregas y seguimiento.
+ALUMNO: ver cursos matriculados, calendario, enlaces Zoom, grabaciones, materiales, tareas, progreso, asistencia, notificaciones y perfil.
+APODERADO (OBLIGATORIO EN MVP): ver exclusivamente hijos vinculados y autorizados, sus cursos, horarios, asistencias, tareas, progreso, comunicados y pagos autorizados. Un apoderado puede tener varios hijos y un menor varios apoderados. Vinculación verificada y aprobada; no permitir modificar notas/asistencia.
+
+5. AUTENTICACIÓN FEDERADA Y AUTORIZACIÓN
+Permitir Microsoft (OIDC), Google (OIDC) y cuenta local (correo/contraseña con verificación y recuperación). Preferir Amazon Cognito o solución OIDC administrada equivalente. Mantener usuario interno único y tabla de identidades externas. No vincular cuentas automáticamente solo por coincidencia de email.
+Distinguir autenticación, verificación, aprobación administrativa, estado activo y matrícula vigente. Nuevo usuario: autenticación/registro -> solicitud pendiente -> revisión por administrador -> vinculación a expediente/matrícula -> aprobación o rechazo -> acceso según permisos. Una autenticación correcta NO concede acceso académico.
+Estados: pendiente verificación, pendiente aprobación, aprobado sin matrícula, aprobado con matrícula, suspendido; la vigencia del acceso a cursos se define por matrícula/política. Validar RBAC y autorización por recurso SIEMPRE en backend. Docentes solo sus grupos; apoderados solo menores vinculados; alumnos solo matrículas autorizadas. Registrar auditoría de aprobaciones.
+
+6. GESTIÓN ACADÉMICA Y MATRÍCULAS
+Separar curso, módulo, edición/grupo, sesión y matrícula. Un curso puede tener muchos grupos, cada grupo sus docentes, alumnos, calendario, videos, materiales y asistencia. El administrador puede registrar alumnos y matrículas antes de que el estudiante cree cuenta; al autenticarse se solicita vinculación verificada.
+Estados de curso, grupo y matrícula; vigencia de acceso configurable. Dashboard alumno: cursos activos/finalizados, próxima sesión, última grabación, progreso y notificaciones. Detalle curso: temario por módulos, sesiones, videos, recursos y tareas.
+
+7. ASISTENCIA
+Docente habilita ventana de asistencia por sesión, configura apertura/cierre y tolerancia. Alumno autenticado, aprobado y matriculado marca asistencia una sola vez, dentro de ventana habilitada; fecha/hora del servidor. Estados: pendiente, presente, tardanza, falta, justificado. Al cerrar, generar faltas para no registrados. Docente revisa registros de sus grupos y corrige con motivo; administrador supervisa, justifica, exporta Excel/PDF y audita. Porcentaje por alumno, curso y grupo. Ver una grabación NO equivale a asistencia en vivo. Integración posterior con reportes de Zoom para contrastar conexiones y duración, con conciliación controlada.
+
+8. GRABACIONES Y MATERIALES
+Grabar clases en Zoom; en MVP subir/vincular grabaciones manualmente y almacenarlas de forma privada. Asociar video a sesión y grupo. Reproductor integrado, fecha, duración, título, estado de publicación, progreso de visualización. Amazon S3 privado y distribución segura mediante CloudFront y firmas de corta vigencia, con validación de matrícula. No almacenar videos en PostgreSQL ni usar URLs públicas permanentes. Materiales: PDF, diapositivas, archivos de práctica, ejercicios y enlaces.
+
+9. TAREAS, PROGRESO Y CALENDARIO
+Docente publica tareas con descripción, fecha límite, archivos y criterios; alumno entrega archivos; docente revisa y retroalimenta. Dashboard con progreso por sesiones y entregas, usando criterios definidos. Calendario de clases, reprogramaciones, tareas, evaluaciones y enlaces Zoom. Notificaciones dentro del portal y por correo sobre cambios, sesiones y tareas.
+
+10. PAGOS Y REPORTES MVP
+Administración registra manualmente precio del curso, descuentos, abonos, saldo y estado de pago. Separar estado financiero de aprobación de cuenta y matrícula. Política explícita si el pago afecta acceso. Reportes básicos: alumnos activos, matrículas, cursos/grupos, asistencia, avance, solicitudes pendientes y pagos. Exportación cuando corresponda.
+
+11. FUNCIONALIDADES POSTERIORES
+Fase 2: evaluaciones, rúbricas, calificaciones, promedios, certificados con QR verificable, reportes avanzados, encuestas y soporte académico.
+Fase 3: pasarela de pagos, integración automatizada con Zoom para grabaciones/asistencia, WhatsApp autorizado, analítica avanzada y automatización de certificados.
+
+12. ARQUITECTURA TÉCNICA
+Frontend: Next.js, React, TypeScript, Tailwind CSS.
+Backend: NestJS, Node.js, TypeScript, API REST, Swagger/OpenAPI, validación, manejo centralizado de errores.
+BD: PostgreSQL con Prisma o alternativa justificada, migraciones versionadas, integridad e índices.
+Identidad: Amazon Cognito federado con Google y Microsoft más usuarios locales; autorización propia de aplicación.
+Objetos: S3 privado; distribución segura de videos con CloudFront.
+Infraestructura: AWS, Terraform, contenedores si corresponde, CI/CD, DEV/QAS/PRD, observabilidad, secretos, respaldos y rollback. Evaluar hosting Next.js y backend (p. ej. opciones administradas o contenedores) según costos reales; evitar sobredimensionamiento. Arquitectura inicial: monolito modular, no microservicios por defecto.
+Módulos: Identity & Access, Users, Students, Guardians, Teachers, Courses, Academic Groups, Enrollments, Sessions, Attendance, Recordings, Materials, Assignments, Progress, Payments, Notifications, Reporting, Audit.
+
+13. MODELO DE DATOS INICIAL
+Entidades: users, roles, user_roles, user_identities, access_requests, student_profiles, guardian_profiles, student_guardians, teacher_profiles, courses, course_modules, academic_groups, group_teachers, enrollments, academic_sessions, attendance_sessions, attendance_records, attendance_adjustments, recordings, materials, assignments, assignment_submissions, student_progress, payments, notifications, audit_logs.
+Usar UUID, PK/FK, relaciones N:M por tablas intermedias, restricciones de unicidad (incluida asistencia alumno/sesión), índices, timestamps, estados, eliminación lógica cuando corresponda, protección de datos y políticas de retención. Elaborar ERD.
+
+14. SEGURIDAD Y PRIVACIDAD
+HTTPS/TLS 1.2+, validación de tokens, RBAC y autorización por recurso, mínimos privilegios, secretos gestionados, cifrado en tránsito/reposo, protección de APIs, rate limits, validación de entrada, controles XSS/CSRF/CORS, protección de datos de menores, consentimiento de apoderados según normativa peruana aplicable, auditoría, backups, monitoreo, pruebas de seguridad y gestión de vulnerabilidades. No revelar datos de otros alumnos. No asumir que marcar asistencia demuestra permanencia en Zoom.
+
+15. DEVOPS Y OPERACIÓN
+Diseñar DEV, QAS y PRD; repositorio, Docker, Terraform, CI/CD, configuración por ambiente, migraciones, despliegue y rollback, logs, métricas, alertas, recuperación. Estimar costos mensuales AWS con supuestos de alumnos, concurrencia, almacenamiento y tráfico de video; señalar riesgos y alternativas.
+
+16. ROADMAP DE CONSTRUCCIÓN
+Etapa 1: arquitectura, sitemap, design system, wireframes, ERD, RBAC, flujos y contratos API.
+Etapa 2: autenticación, autorización, usuarios y aprobaciones.
+Etapa 3: cursos, grupos, docentes, apoderados y matrículas.
+Etapa 4: sesiones, calendario, asistencia y grabaciones.
+Etapa 5: materiales, tareas y progreso.
+Etapa 6: dashboards, pagos manuales, notificaciones y reportes.
+Etapa 7: pruebas, seguridad, despliegue y documentación.
+Cada etapa: alcance, dependencias, APIs, datos, pruebas y criterios de aceptación.
+
+17. ENTREGABLES INICIALES
+1) Documento de arquitectura de solución; 2) diagrama AWS; 3) diagrama de componentes; 4) modelo ER; 5) matriz RBAC; 6) flujo de autenticación/aprobación; 7) flujo de matrícula; 8) flujo de asistencia; 9) API REST/OpenAPI; 10) estructura del repositorio; 11) Terraform propuesto; 12) costos estimados; 13) roadmap; 14) riesgos y ADR; 15) sitemap; 16) wireframes de inicio, catálogo, detalle curso, login y dashboards por rol; 17) design system corporativo.
+
+18. CRITERIOS DE ACEPTACIÓN MVP
+Administrador crea curso/grupo y asigna docente; registra matrícula y apoderado; alumno inicia sesión con Google/Microsoft/local; administrador aprueba y vincula expediente; alumno accede solo a sus cursos, ve calendario y Zoom, registra asistencia; docente supervisa y publica grabación/material/tarea; alumno reproduce y entrega; apoderado consulta solo a su hijo; administración consulta matrículas, pagos y reportes. Usuario no aprobado, no matriculado o suspendido no accede a recursos privados. Cambios críticos auditados.
+
+19. INSTRUCCIÓN INMEDIATA AL AGENTE
+COMIENZA EXCLUSIVAMENTE CON LA ETAPA 1: ARQUITECTURA Y DISEÑO TÉCNICO. Analiza requerimientos, inspecciona referencias visuales, identifica decisiones pendientes, propone arquitectura AWS y sus costos, estructura frontend/backend, ERD, RBAC, flujos de identidad, sitemap, wireframes y estructura de repositorio. Usa Mermaid y ADR. Presenta entregables para revisión y aprobación antes de escribir módulos funcionales. No inventes infraestructura ni credenciales. La meta es una plataforma real, no solo una maqueta.

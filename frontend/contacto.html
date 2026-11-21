@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contacto | EMC Academy</title>
+  <meta name="description" content="Contáctanos para resolver tus dudas sobre los cursos de EMC Academy.">
+  <link rel="icon" type="image/jpeg" href="assets/img/isotipo.jpeg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body data-page="contacto" data-root="">
+<main id="main">
+  <section class="page-hero">
+    <div class="container">
+      <nav class="breadcrumb" aria-label="Ruta"><a href="index.html">Inicio</a><span>/</span><span>Contacto</span></nav>
+      <span class="eyebrow">Contacto</span>
+      <h1>Hablemos</h1>
+      <p class="lead">¿Tienes dudas sobre un curso, horarios o la inscripción de tu hijo? Escríbenos.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container contact-grid">
+      <div>
+        <h2 style="font-size: 1.5rem;">Canales de atención</h2>
+        <div class="contact-items">
+          <a class="contact-item wa" id="ci-wa" href="#" target="_blank" rel="noopener">
+            <i class="fa-brands fa-whatsapp" aria-hidden="true"></i>
+            <div><span>WhatsApp</span><strong id="ci-wa-label"></strong></div>
+          </a>
+          <a class="contact-item" id="ci-mail" href="#">
+            <i class="fa-regular fa-envelope" aria-hidden="true"></i>
+            <div><span>Correo</span><strong id="ci-mail-label"></strong></div>
+          </a>
+          <div class="contact-item">
+            <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+            <div><span>Ubicación</span><strong id="ci-loc"></strong></div>
+          </div>
+        </div>
+        <div class="alert alert-info" style="margin-top: 1.5rem;">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          <p>Para <strong>inscribirte</strong> necesitas una cuenta en el <a href="campus/login.html" style="text-decoration: underline;">Campus Virtual</a>. Este formulario es solo para consultas.</p>
+        </div>
+      </div>
+
+      <form class="form-card" id="contact-form" novalidate>
+        <div class="form-grid">
+          <div class="field"><label for="cf-nombres">Nombres</label><input id="cf-nombres" name="nombres" required autocomplete="given-name"></div>
+          <div class="field"><label for="cf-apellidos">Apellidos</label><input id="cf-apellidos" name="apellidos" required autocomplete="family-name"></div>
+          <div class="field"><label for="cf-email">Correo</label><input id="cf-email" name="email" type="email" required autocomplete="email"></div>
+          <div class="field"><label for="cf-celular">Celular</label><input id="cf-celular" name="celular" type="tel" required pattern="[0-9 +]{9,15}" autocomplete="tel"></div>
+          <div class="field full"><label for="cf-course">Curso de interés</label>
+            <select id="cf-course" name="curso" required><option value="">Selecciona un curso</option></select></div>
+          <label class="field-check full"><input type="checkbox" id="cf-minor"> La consulta es para un menor de edad (soy su apoderado).</label>
+          <fieldset class="fieldset-guardian" id="guardian-fields" hidden>
+            <legend>Datos del apoderado</legend>
+            <div class="field"><label for="cf-apoderado">Nombre del apoderado</label><input id="cf-apoderado" name="apoderado"></div>
+            <div class="field"><label for="cf-apoderado-cel">Celular del apoderado</label><input id="cf-apoderado-cel" name="apoderado_celular" type="tel"></div>
+          </fieldset>
+          <div class="field full"><label for="cf-mensaje">Mensaje (opcional)</label><textarea id="cf-mensaje" name="mensaje"></textarea></div>
+          <label class="field-check full"><input type="checkbox" required> Acepto la <a href="#">política de privacidad</a> y el tratamiento de mis datos para responder a mi consulta.</label>
+          <div class="full"><button type="submit" class="btn btn-primary btn-block"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> Enviar consulta por WhatsApp</button></div>
+          <div class="alert alert-success full" id="contact-ok" hidden role="status">
+            <i class="fa-solid fa-circle-check" aria-hidden="true"></i><p>Abrimos WhatsApp con tu consulta. ¡Te responderemos pronto!</p>
+          </div>
+        </div>
+      </form>
+    </div>
+  </section>
+</main>
+<script src="js/data.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/main.js"></script>
+<script>
+  document.getElementById('ci-wa').href = 'https://wa.me/' + CONFIG.whatsapp;
+  document.getElementById('ci-wa-label').textContent = CONFIG.whatsappLabel;
+  document.getElementById('ci-mail').href = 'mailto:' + CONFIG.email;
+  document.getElementById('ci-mail-label').textContent = CONFIG.email;
+  document.getElementById('ci-loc').textContent = CONFIG.location;
+</script>
+</body>
+</html>

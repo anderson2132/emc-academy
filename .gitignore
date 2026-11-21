@@ -1,0 +1,22 @@
+# Dependencias y compilados
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+backend/src/generated/
+
+# Secretos y configuración local — NUNCA subir
+.env
+.env.*
+!.env.example
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.log
+
+# Pruebas temporales
+frontend/_test/

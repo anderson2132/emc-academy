@@ -5,7 +5,7 @@ import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
 import { AuthService } from '../auth/auth.service';
 import type { AuthUser } from '../../common/auth/auth-user';
-import type { RequestStatus, UserStatus } from '../../generated/prisma/enums';
+import type { RequestStatus, Role, UserStatus } from '../../generated/prisma/enums';
 import type { CreateAccountRequestDto } from './dto';
 
 const ROLE_LABEL = { STUDENT: 'alumno', GUARDIAN: 'apoderado', TEACHER: 'docente', ADMIN: 'administrador' } as const;
@@ -135,12 +135,13 @@ export class AccountsService {
     return result;
   }
 
-  listUsers(status?: UserStatus, q?: string) {
+  listUsers(status?: UserStatus, q?: string, role?: Role) {
     const term = q?.trim();
     return this.prisma.user.findMany({
       where: {
         deletedAt: null,
         status,
+        ...(role ? { roles: { some: { role } } } : {}),
         ...(term ? { OR: [{ email: { contains: term, mode: 'insensitive' } }, { fullName: { contains: term, mode: 'insensitive' } }] } : {}),
       },
       orderBy: { createdAt: 'desc' },

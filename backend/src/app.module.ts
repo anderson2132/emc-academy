@@ -9,6 +9,7 @@ import { MailModule } from './modules/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
 import { CoursesModule } from './modules/courses/courses.module';
+import { AcademicModule } from './modules/academic/academic.module';
 import { HealthController } from './modules/health/health.controller';
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { RolesGuard } from './common/auth/roles.guard';
@@ -23,6 +24,7 @@ import { RolesGuard } from './common/auth/roles.guard';
     AuthModule,
     AccountsModule,
     CoursesModule,
+    AcademicModule,
   ],
   controllers: [HealthController],
   providers: [

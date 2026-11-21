@@ -51,7 +51,7 @@ export class AdminAccountsController {
 
   @Get('users')
   users(@Query() q: ListUsersQuery) {
-    return this.accounts.listUsers(q.status, q.q);
+    return this.accounts.listUsers(q.status, q.q, q.role);
   }
 
   @HttpCode(200)

@@ -1,5 +1,5 @@
 import { IsDateString, IsEnum, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
-import { DocumentType, RequestStatus, UserStatus } from '../../generated/prisma/enums';
+import { DocumentType, RequestStatus, Role, UserStatus } from '../../generated/prisma/enums';
 
 export const REQUESTABLE_ROLES = ['STUDENT', 'GUARDIAN', 'TEACHER'] as const;
 export type RequestableRole = (typeof REQUESTABLE_ROLES)[number];
@@ -52,6 +52,10 @@ export class ListUsersQuery {
   @IsOptional()
   @IsEnum(UserStatus)
   status?: UserStatus;
+
+  @IsOptional()
+  @IsEnum(Role)
+  role?: Role;
 
   @IsOptional()
   @IsString()

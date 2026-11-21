@@ -244,6 +244,11 @@
     nosotros() {},
 
     contacto() {
+      $('#ci-wa').href = `https://wa.me/${CONFIG.whatsapp}`;
+      $('#ci-wa-label').textContent = CONFIG.whatsappLabel;
+      $('#ci-mail').href = `mailto:${CONFIG.email}`;
+      $('#ci-mail-label').textContent = CONFIG.email;
+      $('#ci-loc').textContent = CONFIG.location;
       const select = $('#cf-course');
       select.insertAdjacentHTML('beforeend', COURSES.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join(''));
       const minor = $('#cf-minor');

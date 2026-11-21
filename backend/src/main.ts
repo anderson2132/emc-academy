@@ -5,6 +5,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { AppModule } from './app.module';
 import { originCheck } from './common/security/origin-check.middleware';
 
@@ -22,6 +24,15 @@ async function bootstrap() {
   app.enableCors({ origin: origins, credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   app.enableShutdownHooks();
+
+  // Sitio estático (frontend/) servido desde el MISMO origen que la API: así la cookie de sesión
+  // es de primera parte y el campus funciona en todos los navegadores (incluido Safari).
+  // En Docker se copia a /app/public; en desarrollo local no existe y se usa el servidor de frontend.
+  const publicDir = join(__dirname, '..', 'public');
+  if (existsSync(publicDir)) {
+    app.useStaticAssets(publicDir, { index: 'index.html', extensions: ['html'], maxAge: '5m' });
+    Logger.log(`Sirviendo frontend desde ${publicDir}`, 'Bootstrap');
+  }
 
   if (!isProd) {
     const doc = new DocumentBuilder()

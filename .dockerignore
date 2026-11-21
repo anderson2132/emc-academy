@@ -1,0 +1,18 @@
+# Contexto de construcción = raíz del repo. Solo se necesitan backend/ y frontend/.
+.git
+.github
+docs
+Promt
+información
+**/node_modules
+backend/dist
+backend/coverage
+backend/src/generated
+backend/scripts
+**/.env
+**/.env.*
+!**/.env.example
+**/.neon
+**/*.tsbuildinfo
+**/*.log
+frontend/_test

@@ -2,7 +2,41 @@
 
 NestJS 12 · PostgreSQL 18 · Prisma 7 · Node.js 26. Arquitectura en [../docs/01-arquitectura.md](../docs/01-arquitectura.md).
 
-## Base de datos local
+## Base de datos en línea (Neon) — la que usa hoy la API
+- Proyecto Neon **EMC-ACADEMY** (`restless-shape-96734696`), rama `production`, base `neondb`, PostgreSQL 18, región AWS us-east-1. Cuenta: la personal de Anderson.
+- `backend/neon.ts` declara los servicios (solo Postgres) y `backend/.neon` vincula la carpeta (excluido de git).
+- `neon deploy` escribe en `.env`:
+  - `DATABASE_URL` → conexión **pooled** (`-pooler`), la usa la API.
+  - `DATABASE_URL_UNPOOLED` → conexión **directa**, la usan las migraciones (`prisma.config.ts`).
+- Driver: `pg` (node-postgres) vía `@prisma/adapter-pg`, adecuado para una API de larga duración.
+- Primera carga o nueva BD: `npm run db:setup` (migraciones + cursos + admin + usuarios de prueba).
+- Requiere sesión del CLI: `neon login` (con la cuenta personal, **nunca** la del trabajo).
+- Si `neon deploy` vuelve a escribir `sslmode=require`, cambiarlo a `sslmode=verify-full` (mismo nivel de seguridad, sin el aviso de `pg`).
+
+## Ingreso con Google y Microsoft
+Rutas: `GET /auth/oidc/{google|microsoft}` (inicia; `?mode=link` para vincular desde el panel) y `GET /auth/oidc/{proveedor}/callback`.
+Reglas (ADR-006, `src/modules/auth/oidc/oidc-decision.ts`, con pruebas): no se vinculan cuentas por coincidencia de correo; las cuentas nuevas quedan **pendientes de aprobación**; vincular exige sesión iniciada.
+Sin credenciales configuradas, el proveedor queda desactivado (`GET /auth/providers`).
+
+**Direcciones de retorno a registrar** (una por entorno):
+- Local: `http://localhost:3000/auth/oidc/google/callback` y `http://localhost:3000/auth/oidc/microsoft/callback`
+- Producción: `https://api.emcacademy.pe/auth/oidc/google/callback` y `https://api.emcacademy.pe/auth/oidc/microsoft/callback`
+
+**Google** (https://console.cloud.google.com, con la cuenta personal):
+1. Crear proyecto `EMC Academy` → *APIs y servicios → Pantalla de consentimiento de OAuth*: tipo **Externo**, nombre "EMC Academy", correo de soporte, ámbitos `openid`, `email`, `profile`.
+2. *Credenciales → Crear credenciales → ID de cliente de OAuth* → **Aplicación web** → agregar las direcciones de retorno.
+3. Copiar el ID y el secreto en `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`.
+4. Mientras la app esté "en pruebas", solo pueden ingresar los usuarios de prueba que agregues allí; para abrirlo a todos, *Publicar app*.
+
+**Microsoft** (https://entra.microsoft.com, con la cuenta personal, nunca la del trabajo):
+1. *Registros de aplicaciones → Nuevo registro*: nombre "EMC Academy"; tipos de cuenta: **cuentas de cualquier directorio y cuentas personales de Microsoft**; retorno: plataforma **Web** con la dirección local.
+2. *Autenticación*: agregar también la dirección de producción.
+3. *Certificados y secretos → Nuevo secreto de cliente* (anotar el **valor**, se muestra una sola vez; vence, renovarlo antes).
+4. *Configuración del token → Agregar notificación opcional* → ID token → `email`.
+5. Copiar el *Id. de aplicación (cliente)* en `MICROSOFT_CLIENT_ID` y el valor del secreto en `MICROSOFT_CLIENT_SECRET`; `MICROSOFT_TENANT=common`.
+
+## Base de datos local (respaldo)
+Para volver a la base local, copiar el valor de `DATABASE_URL_LOCAL` en `DATABASE_URL` y quitar `DATABASE_URL_UNPOOLED`.
 El proyecto usa **su propia instancia de PostgreSQL 18** (no la del servicio de Windows):
 - Puerto **5433**, usuario `emc`, base `emc_academy`. La conexión está en `backend/.env`.
 - Datos en `%LOCALAPPDATA%\emc-academy\pgdata` (fuera de OneDrive a propósito: la sincronización puede dañar una base en uso).

@@ -10,6 +10,14 @@ export interface AppEnv {
   CORS_ORIGINS: string[];
   JWT_ACCESS_SECRET: string;
   COOKIE_DOMAIN?: string;
+  /** URL pública de esta API (para las direcciones de retorno de Google/Microsoft). */
+  API_PUBLIC_URL: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  MICROSOFT_CLIENT_ID?: string;
+  MICROSOFT_CLIENT_SECRET?: string;
+  /** common = cuentas personales y de empresa/colegio. */
+  MICROSOFT_TENANT: string;
 }
 
 export function validateEnv(raw: Record<string, unknown>): AppEnv {
@@ -42,9 +50,17 @@ export function validateEnv(raw: Record<string, unknown>): AppEnv {
       .filter(Boolean),
     JWT_ACCESS_SECRET: secret,
     COOKIE_DOMAIN: str('COOKIE_DOMAIN', '') || undefined,
+    API_PUBLIC_URL: str('API_PUBLIC_URL', `http://localhost:${str('PORT', '3000')}`),
+    GOOGLE_CLIENT_ID: str('GOOGLE_CLIENT_ID', '') || undefined,
+    GOOGLE_CLIENT_SECRET: str('GOOGLE_CLIENT_SECRET', '') || undefined,
+    MICROSOFT_CLIENT_ID: str('MICROSOFT_CLIENT_ID', '') || undefined,
+    MICROSOFT_CLIENT_SECRET: str('MICROSOFT_CLIENT_SECRET', '') || undefined,
+    MICROSOFT_TENANT: str('MICROSOFT_TENANT', 'common'),
   };
 
   if (Number.isNaN(env.PORT)) errors.push('PORT debe ser numérico');
+  if (!!env.GOOGLE_CLIENT_ID !== !!env.GOOGLE_CLIENT_SECRET) errors.push('Google: definir GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET juntos');
+  if (!!env.MICROSOFT_CLIENT_ID !== !!env.MICROSOFT_CLIENT_SECRET) errors.push('Microsoft: definir MICROSOFT_CLIENT_ID y MICROSOFT_CLIENT_SECRET juntos');
   if (errors.length) throw new Error(`Configuración inválida:\n - ${errors.join('\n - ')}`);
   return env;
 }

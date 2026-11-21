@@ -19,6 +19,26 @@
   };
   const fmtDate = iso => new Date(iso).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 
+  const PROVIDER_LABEL = { google: 'Google', microsoft: 'Microsoft', GOOGLE: 'Google', MICROSOFT: 'Microsoft' };
+  /** Mensajes para los códigos que devuelve el ingreso con Google/Microsoft. */
+  const OIDC_ERRORS = {
+    EMAIL_IN_USE: 'Ya existe una cuenta con ese correo. Ingresa con tu correo y contraseña, y luego vincula {p} desde tu panel.',
+    IDENTITY_IN_USE: 'Esa cuenta de {p} ya está vinculada a otro usuario.',
+    ALREADY_LINKED: 'Tu cuenta ya tiene {p} vinculado.',
+    LINK_REQUIRES_SESSION: 'Tu sesión venció. Ingresa de nuevo y vuelve a intentar la vinculación.',
+    CANCELLED: 'Cancelaste el ingreso con {p}.',
+    PROVIDER_DISABLED: 'El ingreso con {p} aún no está disponible.',
+    FLOW_EXPIRED: 'El proceso tardó demasiado. Inténtalo de nuevo.',
+    INVALID_FLOW: 'No se pudo completar el ingreso. Inténtalo de nuevo.',
+    TOKEN_EXCHANGE_FAILED: 'No se pudo verificar tu cuenta de {p}. Inténtalo de nuevo.',
+    INVALID_TOKEN: 'No se pudo verificar tu cuenta de {p}. Inténtalo de nuevo.',
+    PROVIDER_ERROR: '{p} devolvió un error. Inténtalo de nuevo.',
+    UNEXPECTED: 'Ocurrió un error inesperado. Inténtalo de nuevo.'
+  };
+  const oidcMessage = (code, provider) =>
+    (OIDC_ERRORS[code] || OIDC_ERRORS.UNEXPECTED).replace('{p}', PROVIDER_LABEL[provider] || 'el proveedor');
+  const oidcUrl = (provider, mode) => `${API_BASE}/auth/oidc/${provider}${mode === 'link' ? '?mode=link' : ''}`;
+
   function showMsg(el, type, html) {
     const icon = { success: 'fa-circle-check', warning: 'fa-triangle-exclamation', danger: 'fa-circle-xmark', info: 'fa-circle-info' }[type];
     el.className = `alert alert-${type}`;
@@ -55,8 +75,19 @@
       msg.hidden = true;
     }));
 
-    document.querySelectorAll('[data-soon]').forEach(b => b.addEventListener('click', () =>
-      showMsg(msg, 'info', 'El ingreso con Google y Microsoft estará disponible cuando se configure el dominio. Por ahora usa tu correo.')));
+    if (params.get('error')) showMsg(msg, 'danger', esc(oidcMessage(params.get('error'), params.get('provider'))));
+
+    // Botones de Google/Microsoft: solo se activan los proveedores configurados en la API.
+    const ssoButtons = document.querySelectorAll('[data-provider]');
+    let enabled = {};
+    api('/auth/providers').then(r => { enabled = r || {}; }).catch(() => {}).finally(() => {
+      ssoButtons.forEach(b => b.addEventListener('click', () => {
+        const p = b.dataset.provider;
+        if (!API_BASE) return showMsg(msg, 'info', 'El Campus Virtual estará disponible próximamente.');
+        if (!enabled[p]) return showMsg(msg, 'info', esc(oidcMessage('PROVIDER_DISABLED', p)));
+        location.href = oidcUrl(p, 'login');
+      }));
+    });
 
     $('#login-form').addEventListener('submit', async e => {
       e.preventDefault();
@@ -171,6 +202,18 @@
     });
 
     const body = $('#panel-body');
+
+    // Avisos que llegan tras volver de Google/Microsoft.
+    const notice = document.createElement('div');
+    notice.className = 'alert';
+    notice.hidden = true;
+    body.before(notice);
+    if (params.get('error')) showMsg(notice, 'danger', esc(oidcMessage(params.get('error'), params.get('provider'))));
+    else if (params.get('linked')) showMsg(notice, 'success', `Listo: ahora también puedes ingresar con ${PROVIDER_LABEL[params.get('linked')] || 'esa cuenta'}.`);
+    else if (params.get('welcome')) showMsg(notice, 'success', 'Tu cuenta fue creada. Completa tu solicitud para que un administrador la apruebe.');
+    if ([...params.keys()].length) history.replaceState(null, '', location.pathname);
+
+    renderLoginMethods(body);
     if (me.status === 'PENDING_APPROVAL') return renderPending(body);
     if (me.status !== 'ACTIVE') {
       body.innerHTML = `<div class="alert alert-danger"><i class="fa-solid fa-lock"></i><p>Tu cuenta está ${statusLabel.toLowerCase()}. Escríbenos por WhatsApp si necesitas ayuda.</p></div>`;
@@ -182,8 +225,37 @@
     if (me.roles.includes('TEACHER')) blocks.push(placeholderBlock('fa-chalkboard-user', 'Mis grupos', 'Aún no tienes grupos asignados. Aquí verás tus clases, asistencia, grabaciones y tareas.'));
     if (me.roles.includes('STUDENT')) blocks.push(placeholderBlock('fa-book-open', 'Mis cursos', `Aún no tienes cursos matriculados. <a href="../programas.html">Ver catálogo</a>.`));
     if (me.roles.includes('GUARDIAN')) blocks.push(placeholderBlock('fa-people-roof', 'Mis hijos', 'Aquí verás los cursos, asistencia y avances de tus hijos vinculados.'));
-    body.innerHTML = blocks.map(b => b.html).join('');
+    body.insertAdjacentHTML('afterbegin', blocks.map(b => b.html).join(''));
     blocks.forEach(b => b.init && b.init());
+  }
+
+  /* ----- Formas de ingreso (vincular Google / Microsoft) ----- */
+  async function renderLoginMethods(body) {
+    const holder = document.createElement('section');
+    holder.className = 'panel-card';
+    body.after(holder);
+    let methods, enabled;
+    try {
+      [methods, enabled] = await Promise.all([api('/auth/login-methods'), api('/auth/providers')]);
+    } catch { holder.remove(); return; }
+
+    const linked = new Set(methods.identities.map(i => i.provider.toLowerCase()));
+    const row = (icon, label, detail, action) => `
+      <li class="method-row"><span><i class="${icon}" aria-hidden="true"></i> <strong>${label}</strong>
+        <span class="muted">${detail}</span></span>${action}</li>`;
+
+    const rows = [row('fa-solid fa-envelope', 'Correo y contraseña', methods.password ? 'Configurado' : 'No configurado', '')];
+    ['google', 'microsoft'].forEach(p => {
+      const icon = `fa-brands fa-${p}`;
+      if (linked.has(p)) {
+        const id = methods.identities.find(i => i.provider.toLowerCase() === p);
+        rows.push(row(icon, PROVIDER_LABEL[p], `Vinculado${id.providerEmail ? ' · ' + esc(id.providerEmail) : ''}`, '<span class="status-pill st-success">Activo</span>'));
+      } else if (enabled[p]) {
+        rows.push(row(icon, PROVIDER_LABEL[p], 'No vinculado', `<a class="btn btn-ghost btn-xs" href="${oidcUrl(p, 'link')}">Vincular</a>`));
+      }
+    });
+
+    holder.innerHTML = `<h2><i class="fa-solid fa-key" aria-hidden="true"></i> Formas de ingreso</h2><ul class="method-list">${rows.join('')}</ul>`;
   }
 
   function placeholderBlock(icon, title, text) {

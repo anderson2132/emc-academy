@@ -9,7 +9,7 @@
 | 5 | Correo | Confirmar Brevo (ADR-008) | Etapa 2 |
 | 6 | Menores sin correo | ¿El menor puede entrar con **usuario + contraseña** creados por el apoderado si no tiene correo? (el modelo ya lo soporta) | Etapa 3 |
 | 7 | Google Drive | ¿Cuenta personal con Google One 2 TB o Google Workspace? (Workspace permite unidades compartidas, mejor para la cuenta de servicio) | Etapa 4 |
-| 8 | Microsoft | Para el login con Microsoft se registra una app en Microsoft Entra (gratis): ¿cuentas personales y de empresa/colegio, o solo una? | Etapa 2 |
+| 8 | Microsoft | ✅ Decidido: cuentas personales y de empresa/colegio (`MICROSOFT_TENANT=common`). Falta crear el registro de la app en Entra y la credencial de Google (ver backend/README.md) | Activar el ingreso |
 | 9 | Legales | Textos de privacidad, términos, consentimiento de apoderado y libro de reclamaciones | Salida a producción |
 | 10 | Contenido | Temario por módulos, descripción, requisitos e imagen de cada uno de los 6 cursos; bio y foto de docentes | Portal |
 

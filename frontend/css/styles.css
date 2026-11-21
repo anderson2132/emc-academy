@@ -546,6 +546,12 @@ h1, h2, h3, h4 {
 .table .actions { white-space: nowrap; text-align: right; }
 .table .actions .btn + .btn { margin-left: .35rem; }
 
+.method-list { display: flex; flex-direction: column; }
+.method-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .85rem 0; border-bottom: 1px solid var(--border); }
+.method-row:last-child { border-bottom: 0; }
+.method-row i { width: 20px; color: var(--blue-light); }
+.method-row .muted { margin-left: .5rem; font-size: .85rem; }
+
 /* ---------- Footer ---------- */
 .site-footer { margin-top: 0; padding-top: 4rem; background: var(--bg-alt); border-top: 1px solid var(--border); }
 .footer-grid { display: grid; grid-template-columns: 1.6fr repeat(4, 1fr); gap: 2rem; padding-bottom: 3rem; }

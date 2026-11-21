@@ -6,7 +6,9 @@
 // la cookie de sesión se comparta. En producción se define window.EMC_API_BASE
 // (p. ej. https://api.{dominio}). Sin API configurada, el campus muestra "próximamente".
 const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
-const API_BASE = window.EMC_API_BASE || (IS_LOCAL ? `http://${location.hostname}:3000` : null);
+const IS_PROD_DOMAIN = /(^|\.)emcacademy\.pe$/.test(location.hostname);
+const API_BASE = window.EMC_API_BASE ||
+  (IS_LOCAL ? `http://${location.hostname}:3000` : IS_PROD_DOMAIN ? 'https://api.emcacademy.pe' : null);
 
 const NO_REFRESH = new Set(['/auth/login', '/auth/refresh', '/auth/logout', '/auth/register']);
 

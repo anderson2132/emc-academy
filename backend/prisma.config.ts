@@ -1,4 +1,4 @@
-import { defineConfig, env } from 'prisma/config';
+import { defineConfig } from 'prisma/config';
 
 // Carga backend/.env (Node 20.12+). En Railway las variables vienen del entorno.
 try {
@@ -13,7 +13,10 @@ export default defineConfig({
     path: 'prisma/migrations',
     seed: 'tsx prisma/seed.ts',
   },
+  // Migraciones por conexión DIRECTA: en Neon, la pooled (PgBouncer, modo transacción)
+  // rompe Prisma Migrate. La app usa DATABASE_URL (pooled) desde PrismaService.
+  // En local no hay pooler: se usa DATABASE_URL.
   datasource: {
-    url: env('DATABASE_URL'),
+    url: process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL ?? '',
   },
 });

@@ -7,6 +7,8 @@ import { MailService } from '../mail/mail.service';
 import { ACCESS_TTL_SECONDS, REFRESH_TTL_SECONDS } from '../../common/auth/cookies';
 import { hashPassword, normalizeLogin, randomToken, sha256, verifyPassword } from './crypto.util';
 import type { EmailTokenType } from '../../generated/prisma/enums';
+import { decideOidc, OidcMode } from './oidc/oidc-decision';
+import { OidcError, OidcIdentity } from './oidc/oidc.service';
 
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MINUTES = 15;
@@ -158,6 +160,79 @@ export class AuthService {
 
   async revokeAllSessions(userId: string): Promise<void> {
     await this.prisma.authSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+
+  // ───────────── Google / Microsoft (OIDC) ─────────────
+
+  /**
+   * Aplica las reglas de vinculación (oidc-decision.ts) y devuelve una sesión
+   * nueva (login o cuenta creada) o null si solo se vinculó a la sesión actual.
+   */
+  async signInWithOidc(
+    identity: OidcIdentity,
+    mode: OidcMode,
+    currentUserId: string | null,
+    client: ClientInfo,
+  ): Promise<{ result: 'LOGIN' | 'CREATED' | 'LINKED'; tokens: SessionTokens | null }> {
+    const provider = identity.provider === 'google' ? 'GOOGLE' : 'MICROSOFT';
+
+    const existing = await this.prisma.userIdentity.findUnique({
+      where: { provider_providerSubject: { provider, providerSubject: identity.subject } },
+      include: { user: { select: { deletedAt: true } } },
+    });
+    const identityOwnerId = existing && !existing.user.deletedAt ? existing.userId : null;
+    const emailOwner = identity.email
+      ? await this.prisma.user.findUnique({ where: { email: identity.email }, select: { id: true } })
+      : null;
+    const currentHasProvider = currentUserId
+      ? !!(await this.prisma.userIdentity.findFirst({ where: { userId: currentUserId, provider } }))
+      : false;
+
+    const decision = decideOidc({ mode, identityOwnerId, currentUserId, emailOwnerId: emailOwner?.id ?? null, currentHasProvider });
+
+    switch (decision.action) {
+      case 'ERROR':
+        throw new OidcError(decision.code);
+
+      case 'LOGIN':
+        await this.audit.log({ actorId: decision.userId, action: 'user.login_oidc', entity: 'user', entityId: decision.userId, after: { provider }, ip: client.ip });
+        return { result: 'LOGIN', tokens: await this.createSession(decision.userId, client) };
+
+      case 'LINK':
+        await this.prisma.userIdentity.create({
+          data: { userId: decision.userId, provider, providerSubject: identity.subject, providerEmail: identity.email },
+        });
+        await this.audit.log({ actorId: decision.userId, action: 'identity.link', entity: 'user', entityId: decision.userId, after: { provider }, ip: client.ip });
+        return { result: 'LINKED', tokens: null };
+
+      case 'CREATE': {
+        const user = await this.prisma.$transaction(async (tx) => {
+          const u = await tx.user.create({
+            data: {
+              email: identity.email,
+              fullName: identity.name ?? identity.email?.split('@')[0] ?? 'Usuario',
+              status: 'PENDING_APPROVAL',
+              emailVerifiedAt: identity.emailVerified ? new Date() : null,
+            },
+          });
+          await tx.userIdentity.create({
+            data: { userId: u.id, provider, providerSubject: identity.subject, providerEmail: identity.email },
+          });
+          await this.audit.log({ actorId: u.id, action: 'user.register_oidc', entity: 'user', entityId: u.id, after: { provider }, ip: client.ip }, tx);
+          return u;
+        });
+        return { result: 'CREATED', tokens: await this.createSession(user.id, client) };
+      }
+    }
+  }
+
+  /** Formas de ingreso de la cuenta (para el panel). */
+  async listLoginMethods(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { passwordHash: true, identities: { select: { provider: true, providerEmail: true, createdAt: true } } },
+    });
+    return { password: !!user.passwordHash, identities: user.identities };
   }
 
   // ───────────── Recuperación de contraseña ─────────────

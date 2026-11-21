@@ -221,12 +221,216 @@
     }
 
     const blocks = [];
-    if (me.roles.includes('ADMIN')) blocks.push(adminBlock());
-    if (me.roles.includes('TEACHER')) blocks.push(placeholderBlock('fa-chalkboard-user', 'Mis grupos', 'Aún no tienes grupos asignados. Aquí verás tus clases, asistencia, grabaciones y tareas.'));
-    if (me.roles.includes('STUDENT')) blocks.push(placeholderBlock('fa-book-open', 'Mis cursos', `Aún no tienes cursos matriculados. <a href="../programas.html">Ver catálogo</a>.`));
+    if (me.roles.includes('ADMIN')) blocks.push(adminBlock(), groupsBlock());
+    if (me.roles.includes('TEACHER')) blocks.push(teacherBlock());
+    if (me.roles.includes('STUDENT')) blocks.push(studentBlock());
     if (me.roles.includes('GUARDIAN')) blocks.push(placeholderBlock('fa-people-roof', 'Mis hijos', 'Aquí verás los cursos, asistencia y avances de tus hijos vinculados.'));
     body.insertAdjacentHTML('afterbegin', blocks.map(b => b.html).join(''));
     blocks.forEach(b => b.init && b.init());
+  }
+
+  /* ----- Alumno: Mis cursos ----- */
+  const ACCESS_MSG = {
+    PAYMENT_OVERDUE: 'Acceso bloqueado: el plazo de pago venció. Envía tu comprobante por WhatsApp para reactivarlo.',
+    MANUAL_BLOCK: 'Acceso bloqueado por administración. Escríbenos por WhatsApp.',
+    GUARDIAN_NOT_APPROVED: 'Falta la autorización de tu apoderado.',
+    GROUP_FINISHED: 'El curso terminó. Puedes revisar las grabaciones y materiales.',
+    ACCESS_EXPIRED: 'El acceso a las grabaciones de este curso ya venció.',
+    ENROLLMENT_NOT_APPROVED: 'Tu matrícula aún no está aprobada.',
+    ACCOUNT_NOT_ACTIVE: 'Tu cuenta no está activa.'
+  };
+  const fmtDay = iso => new Date(`${iso}T12:00:00`).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
+  const soles = cents => `S/ ${(cents / 100).toFixed(2).replace(/\.00$/, '')}`;
+
+  function studentBlock() {
+    return {
+      html: `<section class="panel-card"><h2><i class="fa-solid fa-book-open" aria-hidden="true"></i> Mis cursos</h2><div id="my-courses"><p class="muted">Cargando…</p></div></section>`,
+      async init() {
+        const box = $('#my-courses');
+        try {
+          const list = await api('/me/courses');
+          if (!list.length) { box.innerHTML = `<div class="empty-state"><p>Aún no tienes cursos matriculados. <a href="../programas.html">Ver catálogo</a>.</p></div>`; return; }
+          box.innerHTML = `<div class="course-list">${list.map(c => {
+            const pay = c.payment.paid
+              ? '<span class="status-pill st-success">Pagado</span>'
+              : c.access.live === 'PAYMENT_OVERDUE' || c.access.content === 'PAYMENT_OVERDUE'
+                ? '<span class="status-pill st-danger">Pago vencido</span>'
+                : `<span class="status-pill st-warning">Pago pendiente · hasta ${new Date(c.payment.dueDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}</span>`;
+            const blocked = c.access.live !== 'OK' && c.access.live !== 'GROUP_FINISHED' ? c.access.live : (c.access.content !== 'OK' ? c.access.content : null);
+            return `<article class="my-course">
+              <div class="my-course-head">
+                <div><h3>${esc(c.course.name)}</h3><p class="muted">Grupo ${esc(c.group.code)}</p></div>
+                ${pay}
+              </div>
+              <ul class="my-course-meta">
+                <li><i class="fa-regular fa-calendar" aria-hidden="true"></i> ${fmtDay(c.group.startDate)} – ${fmtDay(c.group.endDate)}</li>
+                ${c.group.schedule ? `<li><i class="fa-regular fa-clock" aria-hidden="true"></i> ${esc(c.group.schedule)}</li>` : ''}
+                ${c.group.teachers.length ? `<li><i class="fa-solid fa-chalkboard-user" aria-hidden="true"></i> ${c.group.teachers.map(esc).join(', ')}</li>` : ''}
+                ${!c.payment.paid ? `<li><i class="fa-solid fa-tag" aria-hidden="true"></i> ${soles(c.payment.amountCents - c.payment.paidCents)} por pagar</li>` : ''}
+              </ul>
+              ${blocked && ACCESS_MSG[blocked] ? `<div class="alert alert-${blocked === 'GROUP_FINISHED' ? 'info' : 'warning'}"><i class="fa-solid fa-circle-info"></i><p>${ACCESS_MSG[blocked]}</p></div>` : ''}
+              ${c.zoomUrl ? `<a class="btn btn-primary btn-sm" href="${esc(c.zoomUrl)}" target="_blank" rel="noopener"><i class="fa-solid fa-video" aria-hidden="true"></i> Entrar a la clase (Zoom)</a>` : ''}
+            </article>`;
+          }).join('')}</div>`;
+        } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+      }
+    };
+  }
+
+  /* ----- Docente: Mis grupos ----- */
+  function teacherBlock() {
+    return {
+      html: `<section class="panel-card"><h2><i class="fa-solid fa-chalkboard-user" aria-hidden="true"></i> Mis grupos</h2><div id="my-groups"><p class="muted">Cargando…</p></div></section>`,
+      async init() {
+        const box = $('#my-groups');
+        try {
+          const list = await api('/me/groups');
+          if (!list.length) { box.innerHTML = '<div class="empty-state"><p>Aún no tienes grupos asignados.</p></div>'; return; }
+          box.innerHTML = `<div class="course-list">${list.map(g => `
+            <article class="my-course">
+              <div class="my-course-head">
+                <div><h3>${esc(g.course.name)}</h3><p class="muted">Grupo ${esc(g.code)}</p></div>
+                <span class="status-pill st-info">${g.students.length} alumno${g.students.length === 1 ? '' : 's'}</span>
+              </div>
+              <ul class="my-course-meta">
+                <li><i class="fa-regular fa-calendar" aria-hidden="true"></i> ${fmtDay(g.startDate)} – ${fmtDay(g.endDate)}</li>
+                ${g.schedule ? `<li><i class="fa-regular fa-clock" aria-hidden="true"></i> ${esc(g.schedule)}</li>` : ''}
+              </ul>
+              ${g.students.length ? `<details class="students-list"><summary>Ver alumnos</summary><ul>${g.students.map(s => `<li>${esc(s.fullName)} <span class="muted">${esc(s.email || '')}</span></li>`).join('')}</ul></details>` : ''}
+              ${g.zoomUrl ? `<a class="btn btn-primary btn-sm" href="${esc(g.zoomUrl)}" target="_blank" rel="noopener"><i class="fa-solid fa-video" aria-hidden="true"></i> Abrir Zoom</a>` : ''}
+            </article>`).join('')}</div>`;
+        } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+      }
+    };
+  }
+
+  /* ----- Administrador: Cursos y grupos ----- */
+  function groupsBlock() {
+    return {
+      html: `
+        <section class="panel-card">
+          <div class="panel-card-head">
+            <h2><i class="fa-solid fa-layer-group" aria-hidden="true"></i> Cursos y grupos</h2>
+            <button class="btn btn-primary btn-sm" id="new-group-btn"><i class="fa-solid fa-plus"></i> Nuevo grupo</button>
+          </div>
+          <form id="group-form" class="form-grid group-form" hidden novalidate>
+            <div class="field"><label for="g-course">Curso</label><select id="g-course" name="courseSlug" required></select></div>
+            <div class="field"><label for="g-start">Fecha de inicio</label><input id="g-start" name="startDate" type="date" required></div>
+            <div class="field"><label for="g-end">Fecha de fin <span class="muted">(opcional: inicio + 8 semanas)</span></label><input id="g-end" name="endDate" type="date"></div>
+            <div class="field"><label for="g-cap">Cupo</label><input id="g-cap" name="capacity" type="number" min="1" max="200" value="20"></div>
+            <div class="field full"><label for="g-sched">Horario</label><input id="g-sched" name="schedule" maxlength="200" placeholder="Ej.: Martes y jueves de 7:00 a 9:00 p. m."></div>
+            <div class="field full"><label for="g-zoom">Enlace de Zoom <span class="muted">(opcional)</span></label><input id="g-zoom" name="zoomUrl" type="url" placeholder="https://zoom.us/j/..."></div>
+            <div class="full"><button class="btn btn-primary" type="submit">Crear grupo</button> <button class="btn btn-ghost" type="button" id="cancel-group">Cancelar</button></div>
+            <div class="alert full" id="group-msg" hidden></div>
+          </form>
+          <div id="groups-box"><p class="muted">Cargando…</p></div>
+          <div id="group-detail"></div>
+        </section>`,
+      init() {
+        const form = $('#group-form');
+        $('#new-group-btn').addEventListener('click', async () => {
+          form.hidden = !form.hidden;
+          if (!form.hidden && !form.courseSlug.options.length) {
+            const courses = await api('/admin/courses').catch(() => []);
+            form.courseSlug.innerHTML = courses.map(c => `<option value="${esc(c.slug)}">${esc(c.name)}${c.level ? ` (nivel ${c.level})` : ''}</option>`).join('');
+          }
+        });
+        $('#cancel-group').addEventListener('click', () => { form.hidden = true; });
+        form.addEventListener('submit', async e => {
+          e.preventDefault();
+          if (!form.reportValidity()) return;
+          const body = { courseSlug: form.courseSlug.value, startDate: form.startDate.value, capacity: Number(form.capacity.value) || 20 };
+          if (form.endDate.value) body.endDate = form.endDate.value;
+          if (form.schedule.value.trim()) body.schedule = form.schedule.value.trim();
+          if (form.zoomUrl.value.trim()) body.zoomUrl = form.zoomUrl.value.trim();
+          setBusy(form, true);
+          try {
+            const g = await api('/admin/groups', { method: 'POST', body });
+            form.reset(); form.hidden = true;
+            await loadGroups();
+            openGroup(g.id);
+          } catch (err) { showMsg($('#group-msg'), 'danger', esc(err.message)); }
+          finally { setBusy(form, false); }
+        });
+        loadGroups();
+      }
+    };
+  }
+
+  async function loadGroups() {
+    const box = $('#groups-box');
+    try {
+      const list = await api('/admin/groups');
+      if (!list.length) { box.innerHTML = '<p class="muted">Aún no hay grupos. Crea uno con <strong>Nuevo grupo</strong> para asignar docentes y alumnos.</p>'; return; }
+      box.innerHTML = `<div class="table-wrap"><table class="table">
+        <thead><tr><th>Curso</th><th>Grupo</th><th>Fechas</th><th>Docentes</th><th>Alumnos</th><th></th></tr></thead>
+        <tbody>${list.map(g => `<tr>
+          <td><strong>${esc(g.course.name)}</strong>${g.schedule ? `<br><span class="muted">${esc(g.schedule)}</span>` : ''}</td>
+          <td class="muted">${esc(g.code)}</td>
+          <td class="muted">${fmtDay(g.startDate)} – ${fmtDay(g.endDate)}</td>
+          <td>${g.teachers.length ? g.teachers.map(t => esc(t.fullName)).join(', ') : '<span class="muted">Sin docente</span>'}</td>
+          <td>${g.students} / ${g.capacity}</td>
+          <td class="actions"><button class="btn btn-ghost btn-xs" data-open-group="${g.id}">Gestionar</button></td>
+        </tr>`).join('')}</tbody></table></div>`;
+      box.querySelectorAll('[data-open-group]').forEach(b => b.addEventListener('click', () => openGroup(b.dataset.openGroup)));
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  async function openGroup(id) {
+    const box = $('#group-detail');
+    box.innerHTML = '<p class="muted">Cargando grupo…</p>';
+    try {
+      const [g, teachers, students] = await Promise.all([
+        api(`/admin/groups/${id}`),
+        api('/admin/users?role=TEACHER&status=ACTIVE'),
+        api('/admin/users?role=STUDENT&status=ACTIVE')
+      ]);
+      const assignedT = new Set(g.teachers.map(t => t.id));
+      const enrolledS = new Set(g.students.map(s => s.id));
+      const tOptions = teachers.filter(u => !assignedT.has(u.id));
+      const sOptions = students.filter(u => !enrolledS.has(u.id));
+      const opt = u => `<option value="${u.id}">${esc(u.fullName)} — ${esc(u.email || u.username || '')}</option>`;
+
+      box.innerHTML = `
+        <div class="group-detail">
+          <div class="panel-card-head">
+            <h3>${esc(g.course.name)} · <span class="muted">${esc(g.code)}</span></h3>
+            <button class="btn btn-ghost btn-xs" id="close-group">Cerrar</button>
+          </div>
+          <p class="muted">${fmtDay(g.startDate)} – ${fmtDay(g.endDate)}${g.schedule ? ' · ' + esc(g.schedule) : ''} · Pago hasta ${new Date(g.paymentDueDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}${g.zoomUrl ? ` · <a href="${esc(g.zoomUrl)}" target="_blank" rel="noopener">Zoom</a>` : ''}</p>
+
+          <h4><i class="fa-solid fa-chalkboard-user"></i> Docentes</h4>
+          <ul class="chip-list">${g.teachers.map(t => `<li>${esc(t.fullName)} <button class="link-btn" data-rm-teacher="${t.id}" aria-label="Quitar ${esc(t.fullName)}">✕</button></li>`).join('') || '<li class="muted">Sin docentes asignados</li>'}</ul>
+          <div class="assign-row">
+            <select id="t-select" aria-label="Docente">${tOptions.length ? tOptions.map(opt).join('') : '<option value="">No hay más docentes activos</option>'}</select>
+            <button class="btn btn-primary btn-xs" id="t-add" ${tOptions.length ? '' : 'disabled'}>Asignar docente</button>
+          </div>
+
+          <h4><i class="fa-solid fa-user-graduate"></i> Alumnos matriculados (${g.students.length}/${g.capacity})</h4>
+          ${g.students.length ? `<div class="table-wrap"><table class="table">
+            <thead><tr><th>Nombre</th><th>Correo</th><th>Pago</th><th></th></tr></thead>
+            <tbody>${g.students.map(s => `<tr><td>${esc(s.fullName)}</td><td class="muted">${esc(s.email || '')}</td>
+              <td>${s.paid ? '<span class="status-pill st-success">Pagado</span>' : `<span class="status-pill st-warning">Pendiente · ${soles(s.priceCents - s.paidCents)}</span>`}</td>
+              <td class="actions"><button class="btn btn-ghost btn-xs" data-rm-student="${s.id}">Quitar</button></td></tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted">Aún no hay alumnos matriculados.</p>'}
+          <div class="assign-row">
+            <select id="s-select" aria-label="Alumno">${sOptions.length ? sOptions.map(opt).join('') : '<option value="">No hay más alumnos activos</option>'}</select>
+            <button class="btn btn-primary btn-xs" id="s-add" ${sOptions.length ? '' : 'disabled'}>Matricular alumno</button>
+          </div>
+          <p class="muted small">Solo aparecen usuarios <strong>activos</strong> con el rol correspondiente. Aprueba primero su solicitud de cuenta.</p>
+          <div class="alert" id="gd-msg" hidden></div>
+        </div>`;
+
+      const act = async (fn) => { try { await fn(); await loadGroups(); await openGroup(id); } catch (err) { showMsg($('#gd-msg'), 'danger', esc(err.message)); } };
+      $('#close-group').addEventListener('click', () => { box.innerHTML = ''; });
+      $('#t-add').addEventListener('click', () => act(() => api(`/admin/groups/${id}/teachers`, { method: 'POST', body: { userId: $('#t-select').value } })));
+      $('#s-add').addEventListener('click', () => act(() => api(`/admin/groups/${id}/students`, { method: 'POST', body: { userId: $('#s-select').value } })));
+      box.querySelectorAll('[data-rm-teacher]').forEach(b => b.addEventListener('click', () => act(() => api(`/admin/groups/${id}/teachers/${b.dataset.rmTeacher}`, { method: 'DELETE' }))));
+      box.querySelectorAll('[data-rm-student]').forEach(b => b.addEventListener('click', () => {
+        if (confirm('¿Quitar a este alumno del grupo? Perderá el acceso al curso.')) act(() => api(`/admin/groups/${id}/students/${b.dataset.rmStudent}`, { method: 'DELETE' }));
+      }));
+      box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
   }
 
   /* ----- Formas de ingreso (vincular Google / Microsoft) ----- */

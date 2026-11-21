@@ -546,6 +546,31 @@ h1, h2, h3, h4 {
 .table .actions { white-space: nowrap; text-align: right; }
 .table .actions .btn + .btn { margin-left: .35rem; }
 
+/* Cursos y grupos */
+.course-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+.my-course { display: flex; flex-direction: column; gap: .85rem; padding: 1.25rem; background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.my-course-head { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; flex-wrap: wrap; }
+.my-course-head h3 { font-size: 1.1rem; }
+.my-course-head .muted { font-size: .8rem; }
+.my-course-meta { display: flex; flex-direction: column; gap: .35rem; font-size: .88rem; color: var(--text-dim); }
+.my-course-meta i { width: 18px; color: var(--blue-light); }
+.my-course .btn { align-self: flex-start; }
+.students-list summary { cursor: pointer; color: var(--blue-light); font-size: .88rem; }
+.students-list ul { margin-top: .5rem; display: flex; flex-direction: column; gap: .3rem; font-size: .88rem; }
+.group-form { padding: 1.25rem; margin-bottom: 1.25rem; background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.group-detail { margin-top: 1.5rem; padding: 1.5rem; background: var(--bg-alt); border: 1px solid var(--blue); border-radius: var(--radius-sm); }
+.group-detail h3 { font-size: 1.15rem; }
+.group-detail h4 { display: flex; align-items: center; gap: .5rem; font-size: 1rem; margin: 1.5rem 0 .75rem; }
+.group-detail h4 i { color: var(--blue-light); }
+.group-detail a { color: var(--blue-light); text-decoration: underline; }
+.chip-list { display: flex; flex-wrap: wrap; gap: .5rem; }
+.chip-list li { display: inline-flex; align-items: center; gap: .5rem; padding: .35rem .8rem; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); font-size: .88rem; }
+.link-btn { background: none; border: 0; color: var(--text-faint); cursor: pointer; font-size: .85rem; padding: 0 .15rem; }
+.link-btn:hover { color: var(--danger); }
+.assign-row { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+.assign-row select { flex: 1; min-width: 240px; padding: .5rem .9rem; border-radius: var(--radius-sm); background: var(--bg); border: 1px solid var(--border); font-size: .88rem; }
+.small { font-size: .8rem; margin-top: .75rem; }
+
 .method-list { display: flex; flex-direction: column; }
 .method-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .85rem 0; border-bottom: 1px solid var(--border); }
 .method-row:last-child { border-bottom: 0; }

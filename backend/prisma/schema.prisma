@@ -4,9 +4,11 @@
 // correos y usuarios guardados en minúsculas.
 
 generator client {
-  provider     = "prisma-client"
-  output       = "../src/generated/prisma"
-  moduleFormat = "cjs"
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  // Explícito: si no, Prisma lo deduce de tsconfig y en Docker (sin tsconfig aún) genera ".ts".
+  importFileExtension = "js"
 }
 
 datasource db {

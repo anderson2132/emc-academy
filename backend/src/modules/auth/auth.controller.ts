@@ -107,6 +107,7 @@ export class AuthController {
     return {
       secure: this.config.get('NODE_ENV') === 'production',
       domain: this.config.get<string>('COOKIE_DOMAIN'),
+      sameSite: this.config.get<'lax' | 'none'>('COOKIE_SAMESITE'),
     };
   }
 }

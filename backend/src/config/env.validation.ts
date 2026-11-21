@@ -10,6 +10,8 @@ export interface AppEnv {
   CORS_ORIGINS: string[];
   JWT_ACCESS_SECRET: string;
   COOKIE_DOMAIN?: string;
+  /** lax (recomendado, mismo dominio) | none (temporal: github.io + railway.app). */
+  COOKIE_SAMESITE: 'lax' | 'none';
   /** URL pública de esta API (para las direcciones de retorno de Google/Microsoft). */
   API_PUBLIC_URL: string;
   GOOGLE_CLIENT_ID?: string;
@@ -50,6 +52,7 @@ export function validateEnv(raw: Record<string, unknown>): AppEnv {
       .filter(Boolean),
     JWT_ACCESS_SECRET: secret,
     COOKIE_DOMAIN: str('COOKIE_DOMAIN', '') || undefined,
+    COOKIE_SAMESITE: str('COOKIE_SAMESITE', 'lax').toLowerCase() as AppEnv['COOKIE_SAMESITE'],
     API_PUBLIC_URL: str('API_PUBLIC_URL', `http://localhost:${str('PORT', '3000')}`),
     GOOGLE_CLIENT_ID: str('GOOGLE_CLIENT_ID', '') || undefined,
     GOOGLE_CLIENT_SECRET: str('GOOGLE_CLIENT_SECRET', '') || undefined,
@@ -59,6 +62,7 @@ export function validateEnv(raw: Record<string, unknown>): AppEnv {
   };
 
   if (Number.isNaN(env.PORT)) errors.push('PORT debe ser numérico');
+  if (!['lax', 'none'].includes(env.COOKIE_SAMESITE)) errors.push('COOKIE_SAMESITE debe ser lax o none');
   if (!!env.GOOGLE_CLIENT_ID !== !!env.GOOGLE_CLIENT_SECRET) errors.push('Google: definir GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET juntos');
   if (!!env.MICROSOFT_CLIENT_ID !== !!env.MICROSOFT_CLIENT_SECRET) errors.push('Microsoft: definir MICROSOFT_CLIENT_ID y MICROSOFT_CLIENT_SECRET juntos');
   if (errors.length) throw new Error(`Configuración inválida:\n - ${errors.join('\n - ')}`);

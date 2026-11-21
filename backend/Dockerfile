@@ -8,11 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-COPY prisma.config.ts ./
+COPY prisma.config.ts tsconfig.json tsconfig.build.json nest-cli.json ./
 # postinstall ejecuta `prisma generate` (allowScripts en package.json)
 RUN npm ci
 
-COPY tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY src ./src
 RUN npm run build
 

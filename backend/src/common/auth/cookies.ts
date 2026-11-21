@@ -8,13 +8,20 @@ export const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60;
 export interface CookieSettings {
   secure: boolean;
   domain?: string;
+  /**
+   * 'lax' (por defecto y recomendado): frontend y API bajo el mismo dominio (www/api.emcacademy.pe).
+   * 'none': TEMPORAL mientras el frontend está en github.io y la API en railway.app (sitios distintos).
+   *         Exige Secure y no funciona en Safari, que bloquea cookies entre sitios.
+   */
+  sameSite?: 'lax' | 'none';
 }
 
 function base(settings: CookieSettings): CookieOptions {
+  const sameSite = settings.sameSite ?? 'lax';
   return {
     httpOnly: true,
-    secure: settings.secure,
-    sameSite: 'lax',
+    secure: sameSite === 'none' ? true : settings.secure,
+    sameSite,
     domain: settings.domain,
   };
 }

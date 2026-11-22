@@ -25,6 +25,29 @@ export class CoursesController {
     });
   }
 
+  /** Grupos abiertos a inscripción de un curso (sin enlace de Zoom). */
+  @Get(':slug/groups')
+  async openGroups(@Param('slug') slug: string) {
+    const groups = await this.prisma.academicGroup.findMany({
+      where: { deletedAt: null, status: 'ENROLLING', course: { slug, status: 'PUBLISHED', deletedAt: null } },
+      orderBy: { startDate: 'asc' },
+      select: {
+        id: true, code: true, startDate: true, endDate: true, schedule: true, capacity: true,
+        teachers: { select: { teacher: { select: { user: { select: { fullName: true } } } } } },
+        _count: { select: { enrollments: { where: { status: 'APPROVED' } } } },
+      },
+    });
+    return groups.map((g) => ({
+      id: g.id,
+      code: g.code,
+      startDate: g.startDate.toISOString().slice(0, 10),
+      endDate: g.endDate.toISOString().slice(0, 10),
+      schedule: g.schedule && typeof g.schedule === 'object' && 'text' in g.schedule ? String((g.schedule as { text: unknown }).text) : null,
+      seatsLeft: Math.max(0, g.capacity - g._count.enrollments),
+      teachers: g.teachers.map((t) => t.teacher.user.fullName),
+    }));
+  }
+
   @Get(':slug')
   async detail(@Param('slug') slug: string) {
     const course = await this.prisma.course.findFirst({

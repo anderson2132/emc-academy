@@ -81,9 +81,22 @@ enum GroupStatus {
 }
 
 enum EnrollmentStatus {
+  /// Menor que pidió su matrícula: espera la autorización del apoderado.
+  PENDING_GUARDIAN
+  /// Espera la aprobación del administrador.
   REQUESTED
   APPROVED
   REJECTED
+  CANCELLED
+}
+
+enum PreEnrollmentStatus {
+  /// Registrada por el admin; espera que la persona cree su cuenta y la reclame.
+  PENDING
+  /// La persona la reclamó desde su cuenta; espera la verificación del admin.
+  CLAIMED
+  /// Vinculada a una cuenta: ya existe la matrícula.
+  LINKED
   CANCELLED
 }
 
@@ -354,8 +367,9 @@ model AcademicGroup {
   course    Course      @relation(fields: [courseId], references: [id])
 
   teachers    GroupTeacher[]
-  enrollments Enrollment[]
-  sessions    ClassSession[]
+  enrollments    Enrollment[]
+  preEnrollments PreEnrollment[]
+  sessions       ClassSession[]
   materials   Material[]
   assignments Assignment[]
 
@@ -388,6 +402,11 @@ model Enrollment {
   blockReason   String?          @map("block_reason")
   approvedById  String?          @map("approved_by") @db.Uuid
   approvedAt    DateTime?        @map("approved_at")
+  /// Apoderado que autorizó la solicitud de un menor.
+  guardianApprovedById String?   @map("guardian_approved_by") @db.Uuid
+  guardianApprovedAt   DateTime? @map("guardian_approved_at")
+  /// Motivo de rechazo o comentario del administrador.
+  reviewNotes   String?          @map("review_notes")
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
   student       StudentProfile   @relation(fields: [studentId], references: [userId])
@@ -397,7 +416,35 @@ model Enrollment {
 
   @@unique([studentId, groupId])
   @@index([groupId, status])
+  @@index([status])
   @@map("enrollments")
+}
+
+/// Prematrícula: el admin registra a un alumno antes de que tenga cuenta.
+/// Al crear su cuenta, la persona la reclama (si su correo verificado coincide)
+/// y el admin confirma la vinculación; recién ahí se crea la matrícula.
+model PreEnrollment {
+  id            String              @id @default(uuid(7)) @db.Uuid
+  groupId       String              @map("group_id") @db.Uuid
+  fullName      String              @map("full_name")
+  email         String
+  phone         String?
+  birthDate     DateTime?           @map("birth_date") @db.Date
+  discountCents Int                 @default(0) @map("discount_cents")
+  notes         String?
+  status        PreEnrollmentStatus @default(PENDING)
+  createdById   String              @map("created_by") @db.Uuid
+  claimedById   String?             @map("claimed_by") @db.Uuid
+  claimedAt     DateTime?           @map("claimed_at")
+  linkedUserId  String?             @map("linked_user_id") @db.Uuid
+  linkedAt      DateTime?           @map("linked_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  group         AcademicGroup       @relation(fields: [groupId], references: [id])
+
+  @@index([email, status])
+  @@index([groupId])
+  @@map("pre_enrollments")
 }
 
 model Payment {

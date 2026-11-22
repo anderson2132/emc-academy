@@ -39,7 +39,7 @@ export interface CourseAccessInput {
     hasApprovedGuardian: boolean;
   };
   enrollment: {
-    status: 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+    status: 'PENDING_GUARDIAN' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
     manualBlock: boolean;
     priceCents: number;
     discountCents: number;

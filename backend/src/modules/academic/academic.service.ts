@@ -9,7 +9,8 @@ import {
   paymentDeadline,
   contentDeadline,
 } from '../../common/access/course-access.policy';
-import type { CreateGroupDto } from './dto';
+import { Prisma } from '../../generated/prisma/client';
+import type { CreateGroupDto, UpdateCourseDto, UpdateGroupDto } from './dto';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** 16 clases, 2 por semana → 8 semanas. */
@@ -56,7 +57,14 @@ export class AcademicService {
         _count: { select: { enrollments: { where: { status: 'APPROVED' } } } },
       },
     });
+    const pending = await this.prisma.enrollment.groupBy({
+      by: ['groupId'],
+      where: { status: { in: ['REQUESTED', 'PENDING_GUARDIAN'] }, groupId: { in: groups.map((g) => g.id) } },
+      _count: { _all: true },
+    });
+    const pendingBy = new Map(pending.map((p) => [p.groupId, p._count._all]));
     return groups.map((g) => ({
+      pendingRequests: pendingBy.get(g.id) ?? 0,
       id: g.id,
       code: g.code,
       course: g.course,
@@ -105,16 +113,22 @@ export class AcademicService {
         course: { select: { slug: true, name: true, priceCents: true } },
         teachers: { include: { teacher: { include: { user: { select: { id: true, fullName: true, email: true } } } } } },
         enrollments: {
-          where: { status: { in: ['APPROVED', 'REQUESTED'] } },
+          where: { status: 'APPROVED' },
           orderBy: { createdAt: 'asc' },
           include: {
-            student: { include: { user: { select: { id: true, fullName: true, email: true } } } },
+            student: { include: { user: { select: { id: true, fullName: true, email: true, username: true } } } },
             payments: { where: { voidedAt: null }, select: { amountCents: true } },
           },
+        },
+        preEnrollments: {
+          where: { status: { in: ['PENDING', 'CLAIMED'] } },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, fullName: true, email: true, status: true },
         },
       },
     });
     if (!g) throw new NotFoundException({ code: 'GROUP_NOT_FOUND', message: 'Grupo no encontrado.' });
+    const pendingRequests = await this.prisma.enrollment.count({ where: { groupId, status: { in: ['REQUESTED', 'PENDING_GUARDIAN'] } } });
 
     const due = paymentDeadline(g.startDate);
     return {
@@ -128,6 +142,8 @@ export class AcademicService {
       capacity: g.capacity,
       status: g.status,
       paymentDueDate: due.toISOString(),
+      pendingRequests,
+      preEnrollments: g.preEnrollments,
       teachers: g.teachers.map((t) => t.teacher.user),
       students: g.enrollments.map((e) => {
         const paidCents = e.payments.reduce((s, p) => s + p.amountCents, 0);
@@ -209,23 +225,151 @@ export class AcademicService {
     return { ok: true };
   }
 
+  /** Editar fechas, horario, Zoom, cupo o estado del grupo. */
+  async updateGroup(admin: AuthUser, groupId: string, dto: UpdateGroupDto, ip?: string) {
+    const g = await this.findGroup(groupId);
+    const startDate = dto.startDate ? toDate(dto.startDate) : g.startDate;
+    const endDate = dto.endDate ? toDate(dto.endDate) : g.endDate;
+    if (endDate < startDate) throw new BadRequestException('La fecha de fin no puede ser anterior al inicio.');
+
+    if (dto.capacity !== undefined) {
+      const approved = await this.prisma.enrollment.count({ where: { groupId, status: 'APPROVED' } });
+      if (dto.capacity < approved) {
+        throw new BadRequestException(`El cupo no puede ser menor que los ${approved} alumnos ya matriculados.`);
+      }
+    }
+
+    const data = {
+      startDate,
+      endDate,
+      ...(dto.schedule !== undefined ? { schedule: dto.schedule.trim() ? { text: dto.schedule.trim() } : Prisma.DbNull } : {}),
+      ...(dto.zoomUrl !== undefined ? { zoomUrl: dto.zoomUrl.trim() || null } : {}),
+      ...(dto.capacity !== undefined ? { capacity: dto.capacity } : {}),
+      ...(dto.status !== undefined ? { status: dto.status } : {}),
+    };
+    const before = { startDate: isoDay(g.startDate), endDate: isoDay(g.endDate), schedule: scheduleText(g.schedule), zoomUrl: g.zoomUrl, capacity: g.capacity, status: g.status };
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.academicGroup.update({ where: { id: groupId }, data });
+      // Un grupo cancelado o terminado ya no recibe alumnos: se cierran las solicitudes en curso.
+      if (dto.status === 'CANCELLED' || dto.status === 'FINISHED') {
+        await tx.enrollment.updateMany({
+          where: { groupId, status: { in: ['REQUESTED', 'PENDING_GUARDIAN'] } },
+          data: { status: 'REJECTED', reviewNotes: dto.status === 'CANCELLED' ? 'El grupo fue cancelado.' : 'El grupo ya terminó.' },
+        });
+        await tx.preEnrollment.updateMany({ where: { groupId, status: { in: ['PENDING', 'CLAIMED'] } }, data: { status: 'CANCELLED' } });
+      }
+      await this.audit.log({
+        actorId: admin.id, action: 'group.update', entity: 'academic_group', entityId: groupId,
+        before, after: { ...dto }, ip,
+      }, tx);
+    });
+    return { ok: true };
+  }
+
+  /** Eliminar (borrado lógico) solo si el grupo no tiene alumnos ni solicitudes; si los tiene, se cancela. */
+  async deleteGroup(admin: AuthUser, groupId: string, ip?: string) {
+    await this.findGroup(groupId);
+    const [active, pre] = await Promise.all([
+      this.prisma.enrollment.count({ where: { groupId, status: { in: ['APPROVED', 'REQUESTED', 'PENDING_GUARDIAN'] } } }),
+      this.prisma.preEnrollment.count({ where: { groupId, status: { in: ['PENDING', 'CLAIMED'] } } }),
+    ]);
+    if (active || pre) {
+      throw new ConflictException({
+        code: 'GROUP_HAS_STUDENTS',
+        message: 'El grupo tiene alumnos, solicitudes o prematrículas. Cámbialo a estado "Cancelado" en lugar de eliminarlo.',
+      });
+    }
+    await this.prisma.academicGroup.update({ where: { id: groupId }, data: { deletedAt: new Date() } });
+    await this.audit.log({ actorId: admin.id, action: 'group.delete', entity: 'academic_group', entityId: groupId, ip });
+    return { ok: true };
+  }
+
+  // ───────────── Cursos y temario (admin) ─────────────
+
+  async courseDetail(courseId: string) {
+    const c = await this.prisma.course.findFirst({
+      where: { id: courseId, deletedAt: null },
+      include: { modules: { select: { position: true, title: true }, orderBy: { position: 'asc' } } },
+    });
+    if (!c) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Curso no encontrado.' });
+    return {
+      id: c.id, slug: c.slug, name: c.name, line: c.line, level: c.level, tool: c.tool,
+      summary: c.summary, description: c.description, objective: c.objective, audience: c.audience,
+      requirements: c.requirements, priceCents: c.priceCents, totalHours: c.totalHours, status: c.status,
+      modules: c.modules,
+    };
+  }
+
+  /** El precio nuevo solo aplica a matrículas nuevas: cada matrícula guarda el precio con que se aprobó. */
+  async updateCourse(admin: AuthUser, courseId: string, dto: UpdateCourseDto, ip?: string) {
+    const before = await this.courseDetail(courseId);
+    const trimOrNull = (v: string | undefined) => (v === undefined ? undefined : v.trim() || null);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.course.update({
+        where: { id: courseId },
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+          ...(dto.summary !== undefined ? { summary: dto.summary.trim() } : {}),
+          description: trimOrNull(dto.description),
+          objective: trimOrNull(dto.objective),
+          audience: trimOrNull(dto.audience),
+          ...(dto.requirements !== undefined ? { requirements: dto.requirements.map((r) => r.trim()).filter(Boolean) } : {}),
+          ...(dto.priceCents !== undefined ? { priceCents: dto.priceCents } : {}),
+          ...(dto.status !== undefined ? { status: dto.status } : {}),
+        },
+      });
+      if (dto.modules !== undefined) {
+        const titles = dto.modules.map((t) => t.trim()).filter(Boolean);
+        await tx.courseModule.deleteMany({ where: { courseId } });
+        if (titles.length) {
+          await tx.courseModule.createMany({ data: titles.map((title, i) => ({ courseId, position: i + 1, title })) });
+        }
+      }
+      const { modules: _m, ...rest } = before;
+      await this.audit.log({
+        actorId: admin.id, action: 'course.update', entity: 'course', entityId: courseId,
+        before: { ...rest, modules: before.modules.map((m) => m.title) }, after: { ...dto }, ip,
+      }, tx);
+    });
+    return this.courseDetail(courseId);
+  }
+
   // ───────────── Alumno ─────────────
 
   async myCourses(user: AuthUser) {
     if (!user.roles.includes('STUDENT')) return [];
-    const profile = await this.prisma.studentProfile.findUnique({
-      where: { userId: user.id },
-      include: { guardians: { where: { status: 'APPROVED' }, select: { guardianId: true } } },
+    return this.studentCourses(user.id, { includeZoom: true });
+  }
+
+  /**
+   * Cursos matriculados (APPROVED) de un alumno, con su acceso calculado por la regla.
+   * Lo usan el alumno (con Zoom) y el apoderado (sin Zoom: el enlace es solo del alumno).
+   */
+  async studentCourses(studentId: string, opts: { includeZoom: boolean }) {
+    const student = await this.prisma.user.findFirst({
+      where: { id: studentId, deletedAt: null },
+      select: {
+        status: true,
+        roles: { select: { role: true } },
+        studentProfile: { include: { guardians: { where: { status: 'APPROVED' }, select: { guardianId: true } } } },
+      },
     });
-    if (!profile) return [];
+    const profile = student?.studentProfile;
+    if (!student || !profile) return [];
 
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { studentId: user.id, status: 'APPROVED', group: { deletedAt: null } },
+      where: { studentId, status: 'APPROVED', group: { deletedAt: null } },
       orderBy: { group: { startDate: 'asc' } },
       include: {
         group: {
           include: {
-            course: { select: { slug: true, name: true, line: true, level: true } },
+            course: {
+              select: {
+                slug: true, name: true, line: true, level: true,
+                modules: { select: { position: true, title: true }, orderBy: { position: 'asc' } },
+              },
+            },
             teachers: { include: { teacher: { include: { user: { select: { fullName: true } } } } } },
           },
         },
@@ -234,11 +378,12 @@ export class AcademicService {
     });
 
     const now = new Date();
+    const isStudent = student.roles.some((r) => r.role === 'STUDENT');
     return enrollments.map((e) => {
       const paidCents = e.payments.reduce((s, p) => s + p.amountCents, 0);
       const base = {
         now,
-        user: { status: user.status, isStudent: true, birthDate: profile.birthDate, hasApprovedGuardian: profile.guardians.length > 0 },
+        user: { status: student.status, isStudent, birthDate: profile.birthDate, hasApprovedGuardian: profile.guardians.length > 0 },
         enrollment: { status: e.status, manualBlock: e.manualBlock, priceCents: e.priceCents, discountCents: e.discountCents, paidCents },
         group: { startDate: e.group.startDate, endDate: e.group.endDate },
       };
@@ -247,6 +392,7 @@ export class AcademicService {
       return {
         course: e.group.course,
         group: {
+          id: e.group.id,
           code: e.group.code,
           startDate: isoDay(e.group.startDate),
           endDate: isoDay(e.group.endDate),
@@ -265,7 +411,7 @@ export class AcademicService {
         },
         contentUntil: contentDeadline(e.group.endDate).toISOString(),
         // El enlace de Zoom solo se entrega si la regla de acceso lo permite.
-        zoomUrl: live.allowed ? e.group.zoomUrl : null,
+        zoomUrl: opts.includeZoom && live.allowed ? e.group.zoomUrl : null,
       };
     });
   }

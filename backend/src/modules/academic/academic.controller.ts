@@ -1,8 +1,8 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AcademicService } from './academic.service';
-import { AssignUserDto, CreateGroupDto } from './dto';
+import { AssignUserDto, CreateGroupDto, UpdateCourseDto, UpdateGroupDto } from './dto';
 import { CurrentUser, Roles } from '../../common/auth/decorators';
 import type { AuthUser } from '../../common/auth/auth-user';
 
@@ -18,9 +18,29 @@ export class AdminAcademicController {
     return this.academic.listCourses();
   }
 
+  @Get('courses/:id')
+  course(@Param('id', ParseUUIDPipe) id: string) {
+    return this.academic.courseDetail(id);
+  }
+
+  @Patch('courses/:id')
+  updateCourse(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCourseDto, @Req() req: Request) {
+    return this.academic.updateCourse(admin, id, dto, req.ip);
+  }
+
   @Get('groups')
   groups() {
     return this.academic.listGroups();
+  }
+
+  @Patch('groups/:id')
+  updateGroup(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateGroupDto, @Req() req: Request) {
+    return this.academic.updateGroup(admin, id, dto, req.ip);
+  }
+
+  @Delete('groups/:id')
+  deleteGroup(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
+    return this.academic.deleteGroup(admin, id, req.ip);
   }
 
   @Post('groups')

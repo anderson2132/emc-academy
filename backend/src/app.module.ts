@@ -10,6 +10,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
 import { CoursesModule } from './modules/courses/courses.module';
 import { AcademicModule } from './modules/academic/academic.module';
+import { EnrollmentsModule } from './modules/enrollments/enrollments.module';
+import { GuardiansModule } from './modules/guardians/guardians.module';
 import { HealthController } from './modules/health/health.controller';
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { RolesGuard } from './common/auth/roles.guard';
@@ -25,6 +27,8 @@ import { RolesGuard } from './common/auth/roles.guard';
     AccountsModule,
     CoursesModule,
     AcademicModule,
+    EnrollmentsModule,
+    GuardiansModule,
   ],
   controllers: [HealthController],
   providers: [

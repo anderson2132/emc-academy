@@ -129,3 +129,26 @@ sequenceDiagram
   A-->>S: 206 Partial Content (el video se reproduce)
   S->>A: PUT progreso visto (cada 30 s)
 ```
+
+## 6. Prematrícula (admin registra antes de que exista la cuenta)
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor AD as Admin
+  participant A as API
+  actor P as Persona
+  AD->>A: POST /admin/pre-enrollments (grupo, nombre, correo, descuento)
+  A-->>P: correo "crea tu cuenta con este correo"
+  P->>A: registro + verificación de correo
+  P->>A: GET /me/pre-enrollments (coincide su correo VERIFICADO)
+  P->>A: POST /me/pre-enrollments/{id}/claim → CLAIMED
+  AD->>A: approve-claim (o /link a una cuenta elegida a mano)
+  A->>A: cuenta ACTIVE como alumno + matrícula APPROVED + auditoría
+```
+
+Nunca se vincula sola por coincidencia de correo: el admin siempre confirma. Para menores sin correo (cuenta con usuario creada por el apoderado), el admin usa "Vincular a otra cuenta…".
+
+## 7. Estados de una solicitud de matrícula
+
+`PENDING_GUARDIAN` (menor pidió; espera a su apoderado) → `REQUESTED` (espera al admin) → `APPROVED` / `REJECTED`. El alumno o apoderado puede anularla (`CANCELLED`) mientras esté en curso. Si el apoderado la pide para su hijo, nace en `REQUESTED`. Regla pura y probada: `backend/src/common/access/enrollment-request.policy.ts`.

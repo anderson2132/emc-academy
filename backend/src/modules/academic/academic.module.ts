@@ -5,5 +5,6 @@ import { AdminAcademicController, MeAcademicController } from './academic.contro
 @Module({
   controllers: [AdminAcademicController, MeAcademicController],
   providers: [AcademicService],
+  exports: [AcademicService],
 })
 export class AcademicModule {}

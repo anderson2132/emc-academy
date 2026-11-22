@@ -1,27 +1,23 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
 import type { AuthUser } from '../../common/auth/auth-user';
 import type { EnrollmentStatus } from '../../generated/prisma/enums';
 import { isMinor, paymentDeadline } from '../../common/access/course-access.policy';
-import {
-  decideEnrollmentRequest,
-  ENROLLMENT_REQUEST_MESSAGES,
-  EnrollmentRequestDenyReason,
-} from '../../common/access/enrollment-request.policy';
-import type { ApproveEnrollmentDto, RequestEnrollmentDto } from './dto';
+import type { ApproveEnrollmentDto } from './dto';
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 const soles = (cents: number) => `S/ ${(cents / 100).toFixed(2).replace(/\.00$/, '')}`;
 const limaDate = (d: Date) => d.toLocaleDateString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: 'long', year: 'numeric' });
 
-const CONFLICT_REASONS: EnrollmentRequestDenyReason[] = ['GROUP_FULL', 'ALREADY_REQUESTED', 'ALREADY_ENROLLED'];
 const PENDING: EnrollmentStatus[] = ['REQUESTED', 'PENDING_GUARDIAN'];
 
 /**
- * Solicitudes de matrícula (segunda aprobación del administrador).
- * Alumno adulto → admin. Menor → apoderado → admin. Apoderado para su hijo → admin.
+ * Solicitudes de matrícula ANTERIORES.
+ * Desde 2026-11-22 solo el administrador matricula (grupo → "Matricular alumno", o prematrícula);
+ * los alumnos y apoderados ya no pueden pedir matrícula. Este servicio queda solo para que el admin
+ * revise o cierre las solicitudes que se hicieron antes del cambio.
  */
 @Injectable()
 export class EnrollmentsService {
@@ -30,162 +26,6 @@ export class EnrollmentsService {
     private readonly audit: AuditService,
     private readonly mail: MailService,
   ) {}
-
-  // ───────────── Alumno / apoderado ─────────────
-
-  async request(user: AuthUser, dto: RequestEnrollmentDto, ip?: string) {
-    const requester = dto.studentId && dto.studentId !== user.id ? 'GUARDIAN' : 'SELF';
-    if (requester === 'GUARDIAN' && !user.roles.includes('GUARDIAN')) {
-      throw new ForbiddenException({ code: 'NOT_YOUR_CHILD', message: ENROLLMENT_REQUEST_MESSAGES.NOT_YOUR_CHILD });
-    }
-    if (requester === 'SELF' && !user.roles.includes('STUDENT')) {
-      throw new ForbiddenException({ code: 'NOT_A_STUDENT', message: 'Tu cuenta no es de alumno. Si eres apoderado, elige a cuál de tus hijos inscribir.' });
-    }
-    const studentId = dto.studentId ?? user.id;
-
-    const [student, group, link, existing] = await Promise.all([
-      this.loadStudent(studentId),
-      this.prisma.academicGroup.findFirst({
-        where: { id: dto.groupId, deletedAt: null },
-        include: { course: { select: { name: true, priceCents: true } } },
-      }),
-      requester === 'GUARDIAN'
-        ? this.prisma.studentGuardian.findUnique({ where: { studentId_guardianId: { studentId, guardianId: user.id } } })
-        : null,
-      this.prisma.enrollment.findUnique({ where: { studentId_groupId: { studentId, groupId: dto.groupId } } }),
-    ]);
-    if (!group) throw new NotFoundException({ code: 'GROUP_NOT_FOUND', message: 'Grupo no encontrado.' });
-    const approvedCount = await this.prisma.enrollment.count({ where: { groupId: group.id, status: 'APPROVED' } });
-
-    const decision = decideEnrollmentRequest({
-      now: new Date(),
-      requester,
-      student: {
-        isActiveStudent: !!student && student.status === 'ACTIVE' && student.roles.some((r) => r.role === 'STUDENT') && !!student.studentProfile,
-        birthDate: student?.studentProfile?.birthDate ?? null,
-        hasApprovedGuardian: !!student?.studentProfile?.guardians.length,
-      },
-      guardianLinkApproved: link?.status === 'APPROVED',
-      group: { status: group.status, capacity: group.capacity, approvedCount },
-      existing: existing?.status ?? null,
-    });
-    if (!decision.allowed) {
-      const body = { code: decision.reason, message: ENROLLMENT_REQUEST_MESSAGES[decision.reason] };
-      if (CONFLICT_REASONS.includes(decision.reason)) throw new ConflictException(body);
-      throw new ForbiddenException(body);
-    }
-
-    const now = new Date();
-    const data = {
-      status: decision.status,
-      requestedById: user.id,
-      priceCents: group.course.priceCents,
-      discountCents: 0,
-      manualBlock: false,
-      blockReason: null,
-      approvedById: null,
-      approvedAt: null,
-      guardianApprovedById: requester === 'GUARDIAN' ? user.id : null,
-      guardianApprovedAt: requester === 'GUARDIAN' ? now : null,
-      reviewNotes: null,
-    };
-    const enrollment = await this.prisma.$transaction(async (tx) => {
-      const e = existing
-        ? await tx.enrollment.update({ where: { id: existing.id }, data })
-        : await tx.enrollment.create({ data: { studentId, groupId: group.id, ...data } });
-      await this.audit.log({
-        actorId: user.id, action: 'enrollment.request', entity: 'enrollment', entityId: e.id,
-        after: { groupId: group.id, studentId, status: decision.status, requester }, ip,
-      }, tx);
-      return e;
-    });
-
-    const studentName = student!.fullName;
-    if (decision.status === 'PENDING_GUARDIAN') {
-      await this.mail.notify(
-        student!.studentProfile!.guardians.map((g) => g.guardian.user.email),
-        `${studentName} quiere inscribirse en ${group.course.name}`,
-        `${studentName} pidió inscribirse en ${group.course.name} (grupo ${group.code}, inicia el ${limaDate(group.startDate)}).\nIngresa al Campus Virtual para autorizar o rechazar la solicitud.`,
-      );
-    } else {
-      await this.notifyAdmins(
-        `Nueva solicitud de matrícula: ${group.course.name}`,
-        `${studentName} pidió matrícula en ${group.course.name} (grupo ${group.code}). Revísala en el Campus Virtual.`,
-      );
-    }
-    return { id: enrollment.id, status: enrollment.status };
-  }
-
-  /** Solicitudes propias y las hechas para los hijos (todas menos las ya aprobadas, que están en "Mis cursos"). */
-  async mine(user: AuthUser) {
-    const rows = await this.prisma.enrollment.findMany({
-      where: {
-        status: { not: 'APPROVED' },
-        OR: [{ studentId: user.id }, { requestedById: user.id }],
-        group: { deletedAt: null },
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: 30,
-      include: {
-        student: { select: { user: { select: { id: true, fullName: true } } } },
-        group: { select: { code: true, startDate: true, course: { select: { name: true } } } },
-      },
-    });
-    return rows.map((e) => ({
-      id: e.id,
-      status: e.status,
-      reviewNotes: e.reviewNotes,
-      createdAt: e.createdAt,
-      student: e.student.user,
-      forMe: e.studentId === user.id,
-      course: e.group.course.name,
-      group: { code: e.group.code, startDate: isoDay(e.group.startDate) },
-    }));
-  }
-
-  async cancel(user: AuthUser, enrollmentId: string, ip?: string) {
-    const e = await this.findEnrollment(enrollmentId);
-    const isGuardian = await this.isApprovedGuardian(user.id, e.studentId);
-    if (e.studentId !== user.id && e.requestedById !== user.id && !isGuardian) throw new NotFoundException();
-    if (!PENDING.includes(e.status)) throw new ConflictException({ code: 'NOT_PENDING', message: 'Solo se pueden anular solicitudes en curso.' });
-    await this.prisma.enrollment.update({ where: { id: e.id }, data: { status: 'CANCELLED' } });
-    await this.audit.log({ actorId: user.id, action: 'enrollment.cancel_request', entity: 'enrollment', entityId: e.id, ip });
-    return { ok: true };
-  }
-
-  /** El apoderado autoriza (o no) la solicitud que hizo su hijo menor. */
-  async guardianDecision(user: AuthUser, enrollmentId: string, approve: boolean, ip?: string) {
-    const e = await this.findEnrollment(enrollmentId);
-    if (!(await this.isApprovedGuardian(user.id, e.studentId))) throw new NotFoundException();
-    if (e.status !== 'PENDING_GUARDIAN') throw new ConflictException({ code: 'NOT_PENDING', message: 'Esta solicitud no espera tu autorización.' });
-
-    const now = new Date();
-    await this.prisma.$transaction(async (tx) => {
-      await tx.enrollment.update({
-        where: { id: e.id },
-        data: approve
-          ? { status: 'REQUESTED', guardianApprovedById: user.id, guardianApprovedAt: now }
-          : { status: 'REJECTED', reviewNotes: 'No autorizada por el apoderado.' },
-      });
-      await this.audit.log({
-        actorId: user.id, action: approve ? 'enrollment.guardian_approve' : 'enrollment.guardian_reject',
-        entity: 'enrollment', entityId: e.id, ip,
-      }, tx);
-    });
-
-    const course = e.group.course.name;
-    await this.mail.notify(
-      [e.student.user.email],
-      approve ? `Tu apoderado autorizó tu inscripción en ${course}` : `Tu inscripción en ${course} no fue autorizada`,
-      approve
-        ? `Hola ${e.student.user.fullName}, tu apoderado autorizó tu solicitud. Ahora la revisará el administrador.`
-        : `Hola ${e.student.user.fullName}, tu apoderado no autorizó tu solicitud para ${course}.`,
-    );
-    if (approve) {
-      await this.notifyAdmins(`Nueva solicitud de matrícula: ${course}`, `${e.student.user.fullName} (menor, autorizado por su apoderado) pidió matrícula en ${course}. Revísala en el Campus Virtual.`);
-    }
-    return { ok: true };
-  }
 
   // ───────────── Administrador ─────────────
 
@@ -319,11 +159,6 @@ export class EnrollmentsService {
     });
     if (!e) throw new NotFoundException();
     return e;
-  }
-
-  private async isApprovedGuardian(guardianId: string, studentId: string) {
-    const link = await this.prisma.studentGuardian.findUnique({ where: { studentId_guardianId: { studentId, guardianId } } });
-    return link?.status === 'APPROVED';
   }
 
   private async notifyAdmins(subject: string, text: string) {

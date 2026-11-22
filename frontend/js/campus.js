@@ -18,7 +18,6 @@
     REJECTED: ['Rechazada', 'danger']
   };
   const fmtDate = iso => new Date(iso).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
-  const INTENT_KEY = 'emc.inscribir';
   const pill = ([label, type]) => `<span class="status-pill st-${type}">${label}</span>`;
   const ENROLL_STATUS = {
     PENDING_GUARDIAN: ['Espera autorización del apoderado', 'warning'],
@@ -85,11 +84,9 @@
 
     const course = typeof COURSES !== 'undefined' && COURSES.find(c => c.slug === params.get('inscribir'));
     if (course) {
-      // Se recuerda el curso elegido para preseleccionarlo en el panel tras ingresar (también vía Google/Microsoft).
-      try { sessionStorage.setItem(INTENT_KEY, course.slug); } catch { /* sin almacenamiento */ }
       const box = $('#enroll-context');
       box.hidden = false;
-      box.innerHTML = `<i class="fa-solid fa-circle-info" aria-hidden="true"></i><p>Para inscribirte en <strong>${esc(course.name)}</strong>, ingresa o crea tu cuenta.</p>`;
+      box.innerHTML = `<i class="fa-solid fa-circle-info" aria-hidden="true"></i><p>Para inscribirte en <strong>${esc(course.name)}</strong>, crea tu cuenta (o ingresa) y escríbenos por WhatsApp: el equipo académico te matricula.</p>`;
     }
 
     // Si ya hay sesión, ir directo al panel.
@@ -255,8 +252,9 @@
       blocks.push(adminRequestsBlock(), enrollmentRequestsBlock(), guardianLinksBlock(), preEnrollmentsBlock(), groupsBlock(), coursesBlock(), usersBlock());
     }
     if (me.roles.includes('TEACHER')) blocks.push(teacherBlock());
-    if (me.roles.includes('STUDENT')) blocks.push(claimBlock(), studentBlock(), enrollBlock(false), myGuardiansBlock());
-    if (me.roles.includes('GUARDIAN')) blocks.push(childrenBlock(), enrollBlock(true), createChildBlock());
+    // La matrícula la hace SOLO el administrador (grupo → "Matricular alumno", o prematrícula).
+    if (me.roles.includes('STUDENT')) blocks.push(claimBlock(), studentBlock(), myGuardiansBlock());
+    if (me.roles.includes('GUARDIAN')) blocks.push(childrenBlock(), createChildBlock());
     body.insertAdjacentHTML('afterbegin', blocks.map(b => b.html).join(''));
     blocks.forEach(b => b.init && b.init());
   }
@@ -281,7 +279,7 @@
         const box = $('#my-courses');
         try {
           const list = await api('/me/courses');
-          if (!list.length) { box.innerHTML = `<div class="empty-state"><p>Aún no tienes cursos matriculados. <a href="../programas.html">Ver catálogo</a>.</p></div>`; return; }
+          if (!list.length) { box.innerHTML = `<div class="empty-state"><p>Aún no tienes cursos matriculados. Para inscribirte, escríbenos por WhatsApp: el equipo académico te matricula. <a href="../programas.html">Ver catálogo</a>.</p></div>`; return; }
           box.innerHTML = `<div class="course-list">${list.map(c => {
             const pay = c.payment.paid
               ? '<span class="status-pill st-success">Pagado</span>'
@@ -516,108 +514,6 @@
       <ol class="temario">${modules.map(m => `<li>${esc(m.title)}</li>`).join('')}</ol></details>`;
   }
 
-  /* ----- Inscripción: alumno (para sí) o apoderado (para un hijo) ----- */
-  function enrollBlock(forGuardian) {
-    const p = forGuardian ? 'gen' : 'sen';
-    return {
-      html: `
-        <section class="panel-card" id="${p}-card">
-          <h2><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> ${forGuardian ? 'Inscribir a mi hijo/a' : 'Inscribirme a un curso'}</h2>
-          <form id="${p}-form" class="form-grid" novalidate>
-            ${forGuardian ? `<div class="field full"><label for="${p}-child">Hijo/a</label><select id="${p}-child" name="studentId" required><option value="">Cargando…</option></select></div>` : ''}
-            <div class="field"><label for="${p}-course">Curso</label><select id="${p}-course" name="course" required><option value="">Cargando…</option></select></div>
-            <div class="field"><label for="${p}-group">Grupo</label><select id="${p}-group" name="groupId" required disabled><option value="">Primero elige un curso</option></select></div>
-            <p class="full muted small" id="${p}-hint">${forGuardian
-              ? 'Tu solicitud ya cuenta como autorización. Luego la revisa el administrador y te avisamos por correo.'
-              : 'El administrador revisa tu solicitud. Si eres menor de edad, primero la autoriza tu apoderado.'}</p>
-            <div class="full"><button class="btn btn-primary" type="submit">Enviar solicitud</button></div>
-            <div class="alert full" id="${p}-msg" hidden></div>
-          </form>
-          <h3 class="sub-title">Solicitudes enviadas</h3>
-          <div id="${p}-list"><p class="muted">Cargando…</p></div>
-        </section>`,
-      async init() {
-        const f = $(`#${p}-form`);
-        const msg = $(`#${p}-msg`);
-        const groupSel = f.groupId;
-
-        if (forGuardian) {
-          const kids = (await api('/me/children').catch(() => [])).filter(k => k.linkStatus === 'APPROVED' && k.student.status === 'ACTIVE');
-          f.studentId.innerHTML = kids.length
-            ? kids.map(k => `<option value="${k.student.id}">${esc(k.student.fullName)}</option>`).join('')
-            : '<option value="">Aún no tienes hijos con vínculo aprobado</option>';
-          if (!kids.length) setBusy(f, true);
-        }
-
-        const courses = await api('/courses').catch(() => []);
-        f.course.innerHTML = '<option value="">Elige un curso…</option>' +
-          courses.map(c => `<option value="${esc(c.slug)}">${esc(c.name)}${c.level ? ` (nivel ${c.level})` : ''} — ${soles(c.priceCents)}</option>`).join('');
-
-        const loadGroupsFor = async slug => {
-          groupSel.disabled = true;
-          if (!slug) { groupSel.innerHTML = '<option value="">Primero elige un curso</option>'; return; }
-          groupSel.innerHTML = '<option value="">Cargando…</option>';
-          const groups = await api(`/courses/${encodeURIComponent(slug)}/groups`).catch(() => []);
-          groupSel.innerHTML = groups.length
-            ? groups.map(g => `<option value="${g.id}" ${g.seatsLeft ? '' : 'disabled'}>Inicia ${fmtDay(g.startDate)}${g.schedule ? ' · ' + esc(g.schedule) : ''} · ${g.seatsLeft ? `${g.seatsLeft} cupos` : 'sin cupos'}</option>`).join('')
-            : '<option value="">No hay grupos con inscripciones abiertas</option>';
-          groupSel.disabled = !groups.length;
-        };
-        f.course.addEventListener('change', () => loadGroupsFor(f.course.value));
-
-        // Curso elegido en el portal antes de ingresar.
-        let intent = null;
-        try { intent = sessionStorage.getItem(INTENT_KEY); sessionStorage.removeItem(INTENT_KEY); } catch { /* sin almacenamiento */ }
-        if (intent && courses.some(c => c.slug === intent)) {
-          f.course.value = intent;
-          await loadGroupsFor(intent);
-          $(`#${p}-card`).scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-
-        f.addEventListener('submit', async e => {
-          e.preventDefault();
-          if (!f.reportValidity()) return;
-          const body = { groupId: groupSel.value };
-          if (forGuardian) body.studentId = f.studentId.value;
-          setBusy(f, true);
-          try {
-            const r = await api('/enrollments', { method: 'POST', body });
-            showMsg(msg, 'success', r.status === 'PENDING_GUARDIAN'
-              ? 'Solicitud enviada. Ahora tu apoderado debe autorizarla desde su panel.'
-              : 'Solicitud enviada. El administrador la revisará y te avisaremos por correo.');
-            loadMyRequests(p);
-            if (forGuardian) loadChildren();
-          } catch (err) { showMsg(msg, 'danger', esc(err.message)); }
-          finally { setBusy(f, false); }
-        });
-        loadMyRequests(p);
-      }
-    };
-  }
-
-  async function loadMyRequests(p) {
-    const box = $(`#${p}-list`);
-    if (!box) return;
-    try {
-      const list = await api('/enrollments/mine');
-      if (!list.length) { box.innerHTML = '<p class="muted">No tienes solicitudes en curso.</p>'; return; }
-      box.innerHTML = `<div class="table-wrap"><table class="table">
-        <thead><tr><th>Curso</th><th>Alumno</th><th>Inicio</th><th>Estado</th><th></th></tr></thead>
-        <tbody>${list.map(r => `<tr>
-          <td><strong>${esc(r.course)}</strong><br><span class="muted">${esc(r.group.code)}</span></td>
-          <td>${r.forMe ? 'Yo' : esc(r.student.fullName)}</td>
-          <td class="muted">${fmtDay(r.group.startDate)}</td>
-          <td>${pill(ENROLL_STATUS[r.status] || [r.status, 'info'])}${r.reviewNotes ? `<br><span class="muted small">${esc(r.reviewNotes)}</span>` : ''}</td>
-          <td class="actions">${['REQUESTED', 'PENDING_GUARDIAN'].includes(r.status) ? `<button class="btn btn-ghost btn-xs" data-cancel-enr="${r.id}">Anular</button>` : ''}</td>
-        </tr>`).join('')}</tbody></table></div>`;
-      box.querySelectorAll('[data-cancel-enr]').forEach(b => b.addEventListener('click', async () => {
-        if (!confirm('¿Anular esta solicitud?')) return;
-        try { await api(`/enrollments/${b.dataset.cancelEnr}/cancel`, { method: 'POST' }); loadMyRequests(p); }
-        catch (err) { alert(err.message); }
-      }));
-    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
-  }
-
   /* ----- Alumno: prematrículas por confirmar ----- */
   function claimBlock() {
     return {
@@ -662,7 +558,7 @@
       <h2><i class="fa-solid fa-people-roof" aria-hidden="true"></i> Mi apoderado</h2>
       ${list.length ? `<ul class="method-list">${list.map(l => `<li class="method-row"><span><strong>${esc(l.guardian.fullName)}</strong>
         <span class="muted">${esc(l.guardian.email || '')}</span></span>${pill(LINK_STATUS[l.status])}</li>`).join('')}</ul>`
-        : '<p class="muted">Si eres <strong>menor de edad</strong>, necesitas un apoderado vinculado para inscribirte.</p>'}
+        : '<p class="muted">Si eres <strong>menor de edad</strong>, necesitas un apoderado vinculado para acceder a tus cursos.</p>'}
       <form class="assign-row" id="add-guardian-form" novalidate>
         <input type="email" name="email" class="input-sm" placeholder="Correo de tu apoderado" required aria-label="Correo de tu apoderado">
         <button class="btn btn-primary btn-xs" type="submit">Agregar apoderado</button>
@@ -715,10 +611,6 @@
               <div><button class="btn btn-primary btn-xs" type="submit">Autorizar</button> <button class="btn btn-ghost btn-xs" type="button" data-decline="${k.student.id}">No soy su apoderado</button></div>
             </form>` : ''}
           ${k.linkStatus === 'PENDING_ADMIN' ? '<p class="muted small">El administrador está revisando el vínculo. Te avisaremos por correo.</p>' : ''}
-          ${k.requests.filter(r => r.status === 'PENDING_GUARDIAN').map(r => `
-            <div class="alert alert-warning"><i class="fa-solid fa-hand"></i><p>Quiere inscribirse en <strong>${esc(r.course)}</strong> (inicia ${fmtDay(r.group.startDate)}).
-              <button class="btn btn-primary btn-xs" data-enr-ok="${r.id}">Autorizar</button> <button class="btn btn-ghost btn-xs" data-enr-no="${r.id}">No autorizar</button></p></div>`).join('')}
-          ${k.requests.filter(r => r.status === 'REQUESTED').map(r => `<p class="small">${pill(ENROLL_STATUS.REQUESTED)} ${esc(r.course)} · inicia ${fmtDay(r.group.startDate)}</p>`).join('')}
           ${k.courses.length ? `<ul class="child-courses">${k.courses.map(c => {
             const pay = c.payment.paid ? pill(['Pagado', 'success'])
               : (c.access.live === 'PAYMENT_OVERDUE' || c.access.content === 'PAYMENT_OVERDUE') ? pill(['Pago vencido', 'danger'])
@@ -726,7 +618,7 @@
             return `<li><strong>${esc(c.course.name)}</strong> ${pay}<br>
               <span class="muted">${fmtDay(c.group.startDate)} – ${fmtDay(c.group.endDate)}${c.group.schedule ? ' · ' + esc(c.group.schedule) : ''}${c.group.teachers.length ? ' · ' + c.group.teachers.map(esc).join(', ') : ''}</span>
               ${!c.payment.paid ? `<br><span class="muted">${soles(c.payment.amountCents - c.payment.paidCents)} por pagar</span>` : ''}</li>`;
-          }).join('')}</ul>` : k.linkStatus === 'APPROVED' ? '<p class="muted small">Sin cursos matriculados todavía.</p>' : ''}
+          }).join('')}</ul>` : k.linkStatus === 'APPROVED' ? '<p class="muted small">Sin cursos matriculados todavía. Para inscribirlo, escríbenos por WhatsApp: el equipo académico lo matricula.</p>' : ''}
         </article>`).join('')}</div>`;
 
       box.querySelectorAll('.authorize-form').forEach(f => f.addEventListener('submit', async e => {
@@ -741,10 +633,6 @@
         if (!confirm('¿Rechazar este vínculo?')) return;
         try { await api(`/me/children/${b.dataset.decline}/decline`, { method: 'POST' }); loadChildren(); } catch (err) { alert(err.message); }
       }));
-      const decide = (id, ok) => api(`/enrollments/${id}/${ok ? 'guardian-approve' : 'guardian-reject'}`, { method: 'POST' })
-        .then(() => { loadChildren(); loadMyRequests('gen'); }).catch(err => alert(err.message));
-      box.querySelectorAll('[data-enr-ok]').forEach(b => b.addEventListener('click', () => decide(b.dataset.enrOk, true)));
-      box.querySelectorAll('[data-enr-no]').forEach(b => b.addEventListener('click', () => { if (confirm('¿No autorizar esta inscripción?')) decide(b.dataset.enrNo, false); }));
     } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
   }
 
@@ -792,18 +680,24 @@
     };
   }
 
-  /* ----- Admin: solicitudes de matrícula ----- */
+  /* ----- Admin: solicitudes de matrícula ANTERIORES -----
+     Desde 2026-11-22 solo el admin matricula; este bloque aparece únicamente
+     si quedan solicitudes hechas por alumnos/apoderados antes del cambio, para cerrarlas. */
   function enrollmentRequestsBlock() {
     return {
-      html: `<section class="panel-card"><div class="panel-card-head">
-          <h2><i class="fa-solid fa-file-signature" aria-hidden="true"></i> Solicitudes de matrícula</h2>
+      html: `<section class="panel-card" id="enr-card" hidden><div class="panel-card-head">
+          <h2><i class="fa-solid fa-file-signature" aria-hidden="true"></i> Solicitudes de matrícula anteriores</h2>
           <select id="enr-filter" class="input-sm" aria-label="Filtrar solicitudes">
             <option value="REQUESTED">Por revisar</option>
             <option value="PENDING_GUARDIAN">Esperando al apoderado</option>
             <option value="REJECTED">Rechazadas</option>
           </select></div>
         <div id="enr-box"><p class="muted">Cargando…</p></div></section>`,
-      init() {
+      async init() {
+        const [a, b] = await Promise.all(['REQUESTED', 'PENDING_GUARDIAN'].map(s => api(`/admin/enrollments?status=${s}`).catch(() => [])));
+        if (!a.length && !b.length) { $('#enr-card').remove(); return; }
+        $('#enr-card').hidden = false;
+        if (!a.length) $('#enr-filter').value = 'PENDING_GUARDIAN';
         $('#enr-filter').addEventListener('change', loadEnrollmentRequests);
         loadEnrollmentRequests();
       }

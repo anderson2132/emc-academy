@@ -4,12 +4,11 @@ import { PreEnrollmentsService } from './pre-enrollments.service';
 import {
   AdminEnrollmentsController,
   AdminPreEnrollmentsController,
-  EnrollmentsController,
   MePreEnrollmentsController,
 } from './enrollments.controller';
 
 @Module({
-  controllers: [EnrollmentsController, AdminEnrollmentsController, AdminPreEnrollmentsController, MePreEnrollmentsController],
+  controllers: [AdminEnrollmentsController, AdminPreEnrollmentsController, MePreEnrollmentsController],
   providers: [EnrollmentsService, PreEnrollmentsService],
 })
 export class EnrollmentsModule {}

@@ -2,16 +2,6 @@ import { IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Mat
 import { Type } from 'class-transformer';
 import { EnrollmentStatus, PreEnrollmentStatus } from '../../generated/prisma/enums';
 
-export class RequestEnrollmentDto {
-  @IsUUID()
-  groupId: string;
-
-  /** Solo apoderados: el hijo a inscribir. Si se omite, la solicitud es para uno mismo. */
-  @IsOptional()
-  @IsUUID()
-  studentId?: string;
-}
-
 export class ListEnrollmentsQuery {
   @IsOptional()
   @IsEnum(EnrollmentStatus)

@@ -65,6 +65,8 @@ El consentimiento guarda la versión del texto aceptado, la fecha y la IP.
 
 ## 3. Inscripción, pago y bloqueo
 
+> **Cambio 2026-11-22:** solo el administrador matricula (grupo → "Matricular alumno", o prematrícula). El diagrama conserva el pago y el bloqueo; los pasos de "Inscribirme" y aprobación de solicitud ya no aplican.
+
 ```mermaid
 sequenceDiagram
   autonumber
@@ -149,6 +151,6 @@ sequenceDiagram
 
 Nunca se vincula sola por coincidencia de correo: el admin siempre confirma. Para menores sin correo (cuenta con usuario creada por el apoderado), el admin usa "Vincular a otra cuenta…".
 
-## 7. Estados de una solicitud de matrícula
+## 7. Solicitudes de matrícula (retiradas)
 
-`PENDING_GUARDIAN` (menor pidió; espera a su apoderado) → `REQUESTED` (espera al admin) → `APPROVED` / `REJECTED`. El alumno o apoderado puede anularla (`CANCELLED`) mientras esté en curso. Si el apoderado la pide para su hijo, nace en `REQUESTED`. Regla pura y probada: `backend/src/common/access/enrollment-request.policy.ts`.
+Desde 2026-11-22 alumnos y apoderados ya no pueden pedir matrícula (se quitaron `POST /enrollments` y la autorización del apoderado). Solo quedan `/admin/enrollments` para revisar o rechazar solicitudes hechas antes del cambio; el bloque del panel aparece solo si existe alguna.

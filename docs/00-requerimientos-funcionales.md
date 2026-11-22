@@ -20,18 +20,18 @@ Formación tecnológica online en vivo por Zoom. **Catálogo completo (6 cursos)
 
 ## 2. Portal público
 - Visible para cualquiera: cursos, **precios**, docentes **con foto y perfil**, Kids & Teens, próximos inicios, contacto.
-- **Solo usuarios registrados pueden inscribirse.** No hay formulario anónimo de inscripción.
+- **Solo el administrador matricula** (cambio del 2026-11-22). Alumnos, docentes y apoderados no pueden inscribirse solos: escriben por WhatsApp y el admin los matricula desde el grupo o con una prematrícula.
 - Contacto: WhatsApp y correo.
 
 ## 3. Cuentas y aprobaciones
 - Todos (alumnos, apoderados, docentes) **se registran solos**: Google, Microsoft o correo/contraseña.
 - **Doble aprobación del administrador:**
   1. Aprueba la **cuenta** (y asigna rol).
-  2. Aprueba cada **matrícula** (solicitud de inscripción a un grupo).
+  2. **Matricula** al alumno en el grupo (él mismo; ya no hay solicitudes de matrícula).
 - Autenticarse no da acceso a nada académico.
 
 ## 4. Menores y apoderados
-- Al menor lo inscribe **el apoderado**, o el **propio menor con autorización del apoderado**.
+- Al menor lo matricula **el administrador**. El apoderado registra o autoriza la cuenta del menor (vínculo) y luego consulta su avance.
 - El menor tiene **cuenta propia**, vinculada al apoderado; la vinculación la autoriza el apoderado y la aprueba el admin.
 - Un apoderado puede tener varios hijos; un menor, varios apoderados.
 - El apoderado ve solo a sus hijos vinculados: cursos, horarios, asistencia, tareas, avisos y estado de pago. No modifica nada.

@@ -10,48 +10,9 @@ import {
   ListEnrollmentsQuery,
   ListPreEnrollmentsQuery,
   NotesDto,
-  RequestEnrollmentDto,
 } from './dto';
 import { AllowInactive, CurrentUser, Roles } from '../../common/auth/decorators';
 import type { AuthUser } from '../../common/auth/auth-user';
-
-/** Solicitudes de matrícula del alumno o del apoderado. */
-@ApiTags('matrículas')
-@Controller('enrollments')
-export class EnrollmentsController {
-  constructor(private readonly enrollments: EnrollmentsService) {}
-
-  @Roles('STUDENT', 'GUARDIAN')
-  @Post()
-  request(@CurrentUser() user: AuthUser, @Body() dto: RequestEnrollmentDto, @Req() req: Request) {
-    return this.enrollments.request(user, dto, req.ip);
-  }
-
-  @Get('mine')
-  mine(@CurrentUser() user: AuthUser) {
-    return this.enrollments.mine(user);
-  }
-
-  @HttpCode(200)
-  @Post(':id/cancel')
-  cancel(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
-    return this.enrollments.cancel(user, id, req.ip);
-  }
-
-  @Roles('GUARDIAN')
-  @HttpCode(200)
-  @Post(':id/guardian-approve')
-  guardianApprove(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
-    return this.enrollments.guardianDecision(user, id, true, req.ip);
-  }
-
-  @Roles('GUARDIAN')
-  @HttpCode(200)
-  @Post(':id/guardian-reject')
-  guardianReject(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
-    return this.enrollments.guardianDecision(user, id, false, req.ip);
-  }
-}
 
 /** Revisión de solicitudes de matrícula (solo ADMIN). */
 @ApiTags('admin · matrículas')

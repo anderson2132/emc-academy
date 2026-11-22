@@ -241,24 +241,209 @@
     else if (params.get('welcome')) showMsg(notice, 'success', 'Tu cuenta fue creada. Completa tu solicitud para que un administrador la apruebe.');
     if ([...params.keys()].length) history.replaceState(null, '', location.pathname);
 
-    renderLoginMethods(body);
+    if (me.status !== 'ACTIVE') renderLoginMethods(body);
     if (me.status === 'PENDING_APPROVAL') return renderPending(body);
     if (me.status !== 'ACTIVE') {
       body.innerHTML = `<div class="alert alert-danger"><i class="fa-solid fa-lock"></i><p>Tu cuenta está ${statusLabel.toLowerCase()}. Escríbenos por WhatsApp si necesitas ayuda.</p></div>`;
       return;
     }
 
-    const blocks = [];
-    if (me.roles.includes('ADMIN')) {
-      blocks.push(adminRequestsBlock(), enrollmentRequestsBlock(), guardianLinksBlock(), preEnrollmentsBlock(), groupsBlock(), coursesBlock(), usersBlock());
-    }
-    if (me.roles.includes('TEACHER')) blocks.push(teacherBlock());
-    // La matrícula la hace SOLO el administrador (grupo → "Matricular alumno", o prematrícula).
-    if (me.roles.includes('STUDENT')) blocks.push(claimBlock(), studentBlock(), myGuardiansBlock());
-    if (me.roles.includes('GUARDIAN')) blocks.push(childrenBlock(), createChildBlock());
-    body.insertAdjacentHTML('afterbegin', blocks.map(b => b.html).join(''));
-    blocks.forEach(b => b.init && b.init());
+    // Cuenta activa: consola con menú lateral.
+    renderConsole(me, notice);
   }
+
+  /* ───────────── Consola: menú lateral + vista a pantalla completa ─────────────
+     Cada vista reutiliza los bloques existentes ({ html, init }). La vista activa va en el hash (#grupos),
+     así funcionan "atrás"/"adelante" y se puede compartir el enlace. */
+  function consoleSections(me) {
+    const sections = [];
+    const has = r => me.roles.includes(r);
+    if (has('ADMIN')) {
+      sections.push({
+        title: 'Administración',
+        views: [
+          { id: 'resumen', icon: 'fa-gauge-high', label: 'Resumen', blocks: () => [summaryBlock()] },
+          { id: 'cuentas', icon: 'fa-user-check', label: 'Solicitudes de cuenta', badge: s => s.pendingAccounts, blocks: () => [adminRequestsBlock()] },
+          { id: 'vinculos', icon: 'fa-people-roof', label: 'Apoderados', badge: s => s.pendingLinks, blocks: () => [guardianLinksBlock()] },
+          { id: 'prematriculas', icon: 'fa-user-clock', label: 'Prematrículas', badge: s => s.claimedPreEnrollments, blocks: () => [preEnrollmentsBlock()] },
+          { id: 'grupos', icon: 'fa-layer-group', label: 'Grupos y pagos', badge: s => s.overdueCount, badgeType: 'danger', blocks: () => [enrollmentRequestsBlock(), groupsBlock()] },
+          { id: 'cursos', icon: 'fa-book', label: 'Cursos y temario', blocks: () => [coursesBlock()] },
+          { id: 'usuarios', icon: 'fa-users', label: 'Usuarios y roles', blocks: () => [usersBlock()] }
+        ]
+      });
+    }
+    if (has('TEACHER')) {
+      sections.push({ title: 'Docente', views: [{ id: 'mis-grupos', icon: 'fa-chalkboard-user', label: 'Mis grupos', blocks: () => [teacherBlock()] }] });
+    }
+    // La matrícula la hace SOLO el administrador (grupo → "Matricular alumno", o prematrícula).
+    if (has('STUDENT')) {
+      sections.push({
+        title: 'Alumno',
+        views: [
+          { id: 'mis-cursos', icon: 'fa-book-open', label: 'Mis cursos', blocks: () => [claimBlock(), studentBlock()] },
+          { id: 'mi-apoderado', icon: 'fa-people-roof', label: 'Mi apoderado', blocks: () => [myGuardiansBlock()] }
+        ]
+      });
+    }
+    if (has('GUARDIAN')) {
+      sections.push({
+        title: 'Apoderado',
+        views: [
+          { id: 'mis-hijos', icon: 'fa-children', label: 'Mis hijos', blocks: () => [childrenBlock()] },
+          { id: 'registrar-hijo', icon: 'fa-user-plus', label: 'Registrar a mi hijo/a', blocks: () => [createChildBlock()] }
+        ]
+      });
+    }
+    sections.push({ title: 'Cuenta', views: [{ id: 'mi-cuenta', icon: 'fa-key', label: 'Mi cuenta', blocks: () => [accountBlock(me)] }] });
+    return sections;
+  }
+
+  function renderConsole(me, notice) {
+    document.body.classList.add('console-mode');
+    const sections = consoleSections(me);
+    const views = sections.flatMap(s => s.views);
+    const isAdmin = me.roles.includes('ADMIN');
+    const roles = me.roles.map(r => ROLE_LABEL[r] || r).join(' · ');
+
+    root().innerHTML = `
+      <div class="console">
+        <aside class="console-nav" id="console-nav" aria-label="Menú del campus">
+          <div class="console-user">
+            <span class="console-avatar" aria-hidden="true">${esc((me.fullName.trim()[0] || '?').toUpperCase())}</span>
+            <div><strong>${esc(me.fullName)}</strong><span class="muted">${esc(roles)}</span></div>
+          </div>
+          <nav>${sections.map(s => `
+            <p class="console-section">${esc(s.title)}</p>
+            <ul>${s.views.map(v => `<li><a href="#${v.id}" data-view="${v.id}"><i class="fa-solid ${v.icon}" aria-hidden="true"></i><span>${esc(v.label)}</span><span class="nav-badge" data-badge="${v.id}" hidden></span></a></li>`).join('')}</ul>`).join('')}
+          </nav>
+          <button class="console-logout" id="logout"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> Cerrar sesión</button>
+        </aside>
+        <div class="console-scrim" id="console-scrim" hidden></div>
+        <main class="console-main">
+          <div class="console-top">
+            <button class="console-toggle" id="console-toggle" aria-controls="console-nav" aria-expanded="false" aria-label="Abrir menú"><i class="fa-solid fa-bars"></i></button>
+            <div><span class="eyebrow">Campus Virtual</span><h1 id="view-title"></h1></div>
+          </div>
+          <div id="console-notice"></div>
+          <div id="view"></div>
+        </main>
+      </div>`;
+
+    if (!notice.hidden) $('#console-notice').appendChild(notice);
+    $('#logout').addEventListener('click', async () => {
+      await api('/auth/logout', { method: 'POST' }).catch(() => {});
+      location.href = 'login.html';
+    });
+
+    // Menú en celular.
+    const nav = $('#console-nav'), scrim = $('#console-scrim'), toggle = $('#console-toggle');
+    const setMenu = open => { nav.classList.toggle('open', open); scrim.hidden = !open; toggle.setAttribute('aria-expanded', String(open)); };
+    toggle.addEventListener('click', () => setMenu(!nav.classList.contains('open')));
+    scrim.addEventListener('click', () => setMenu(false));
+
+    const refreshBadges = async () => {
+      if (!isAdmin) return;
+      const s = await api('/admin/summary').catch(() => null);
+      if (!s) return;
+      views.forEach(v => {
+        const el = $(`[data-badge="${v.id}"]`);
+        const n = v.badge ? v.badge(s) : 0;
+        el.hidden = !n;
+        el.textContent = n || '';
+        el.className = `nav-badge${v.badgeType === 'danger' ? ' nav-badge-danger' : ''}`;
+      });
+    };
+    consoleRefresh = refreshBadges;
+
+    const show = () => {
+      const id = location.hash.slice(1);
+      const view = views.find(v => v.id === id) || views[0];
+      document.querySelectorAll('[data-view]').forEach(a => {
+        const on = a.dataset.view === view.id;
+        a.classList.toggle('active', on);
+        if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      });
+      $('#view-title').textContent = view.label;
+      document.title = `${view.label} | Campus Virtual EMC Academy`;
+      const blocks = view.blocks();
+      $('#view').innerHTML = blocks.map(b => b.html).join('');
+      blocks.forEach(b => b.init && b.init());
+      setMenu(false);
+      window.scrollTo(0, 0);
+      refreshBadges();
+    };
+    window.addEventListener('hashchange', show);
+    show();
+  }
+
+  /** Se reemplaza al abrir la consola: actualiza los contadores del menú tras una acción. */
+  let consoleRefresh = () => {};
+
+  /* ----- Mi cuenta (datos + formas de ingreso) ----- */
+  function accountBlock(me) {
+    const [statusLabel, statusType] = STATUS_LABEL[me.status] || [me.status, 'info'];
+    return {
+      html: `<section class="panel-card"><h2><i class="fa-solid fa-id-card" aria-hidden="true"></i> Mis datos</h2>
+        <ul class="method-list">
+          <li class="method-row"><span><strong>Nombre</strong></span><span>${esc(me.fullName)}</span></li>
+          <li class="method-row"><span><strong>Correo</strong></span><span>${esc(me.email || '—')}</span></li>
+          <li class="method-row"><span><strong>Roles</strong></span><span>${me.roles.map(r => `<span class="badge">${ROLE_LABEL[r] || r}</span>`).join(' ')}</span></li>
+          <li class="method-row"><span><strong>Estado</strong></span><span class="status-pill st-${statusType}">${statusLabel}</span></li>
+        </ul></section>
+        <div id="account-methods"></div>`,
+      init() { renderLoginMethods($('#account-methods'), true); }
+    };
+  }
+
+  /* ----- Admin: Resumen ----- */
+  function summaryBlock() {
+    return {
+      html: '<div id="summary-box"><p class="muted">Cargando…</p></div>',
+      async init() {
+        const box = $('#summary-box');
+        try {
+          const s = await api('/admin/summary');
+          const card = (n, label, icon, href, type = '') => `
+            <a class="stat-card ${type && n ? 'stat-' + type : ''}" href="#${href}">
+              <i class="fa-solid ${icon}" aria-hidden="true"></i><strong>${n}</strong><span>${label}</span></a>`;
+          const todo = [
+            s.pendingAccounts && `<li><a href="#cuentas"><strong>${s.pendingAccounts}</strong> solicitud${s.pendingAccounts === 1 ? '' : 'es'} de cuenta por aprobar</a></li>`,
+            s.pendingLinks && `<li><a href="#vinculos"><strong>${s.pendingLinks}</strong> vínculo${s.pendingLinks === 1 ? '' : 's'} de apoderado por aprobar</a></li>`,
+            s.claimedPreEnrollments && `<li><a href="#prematriculas"><strong>${s.claimedPreEnrollments}</strong> prematrícula${s.claimedPreEnrollments === 1 ? '' : 's'} reclamada${s.claimedPreEnrollments === 1 ? '' : 's'} por verificar</a></li>`,
+            s.legacyRequests && `<li><a href="#grupos"><strong>${s.legacyRequests}</strong> solicitud${s.legacyRequests === 1 ? '' : 'es'} de matrícula anterior${s.legacyRequests === 1 ? '' : 'es'} por cerrar</a></li>`,
+            s.overdueCount && `<li><a href="#grupos"><strong>${s.overdueCount}</strong> alumno${s.overdueCount === 1 ? '' : 's'} con pago vencido (acceso bloqueado)</a></li>`
+          ].filter(Boolean);
+          box.innerHTML = `
+            <div class="stat-grid">
+              ${card(s.pendingAccounts + s.pendingLinks + s.claimedPreEnrollments, 'Pendientes por revisar', 'fa-inbox', 'cuentas', 'warning')}
+              ${card(s.overdueCount, 'Pagos vencidos', 'fa-circle-exclamation', 'grupos', 'danger')}
+              ${card(s.unpaidCount, 'Pagos pendientes', 'fa-hourglass-half', 'grupos', 'warning')}
+              ${card(s.activeEnrollments, 'Matrículas vigentes', 'fa-user-graduate', 'grupos')}
+              ${card(s.openGroups, 'Grupos con inscripciones abiertas', 'fa-door-open', 'grupos')}
+              ${card(s.inProgressGroups, 'Grupos en curso', 'fa-person-chalkboard', 'grupos')}
+            </div>
+            <section class="panel-card"><h2><i class="fa-solid fa-list-check" aria-hidden="true"></i> Por hacer</h2>
+              ${todo.length ? `<ul class="todo-list">${todo.join('')}</ul>` : '<p class="muted">Todo al día. 🎉</p>'}</section>
+            <section class="panel-card"><h2><i class="fa-solid fa-money-bill-wave" aria-hidden="true"></i> Pagos pendientes</h2>
+              ${s.unpaid.length ? `<div class="table-wrap"><table class="table">
+                <thead><tr><th>Alumno</th><th>Curso / grupo</th><th>Monto</th><th>Plazo</th><th></th></tr></thead>
+                <tbody>${s.unpaid.map(u => `<tr>
+                  <td>${esc(u.student)}</td>
+                  <td>${esc(u.course)}<br><span class="muted">${esc(u.group.code)}</span></td>
+                  <td>${soles(u.amountCents)}</td>
+                  <td>${u.overdue ? pill(['Vencido · acceso bloqueado', 'danger']) : pill([`Hasta ${new Date(u.dueDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}`, 'warning'])}</td>
+                  <td class="actions"><a class="btn btn-ghost btn-xs" href="#grupos" data-goto-group="${u.group.id}">Ver grupo</a></td>
+                </tr>`).join('')}</tbody></table></div>
+                ${s.unpaidCount > s.unpaid.length ? `<p class="muted small">Se muestran ${s.unpaid.length} de ${s.unpaidCount}.</p>` : ''}`
+                : '<p class="muted">No hay pagos pendientes.</p>'}</section>`;
+          box.querySelectorAll('[data-goto-group]').forEach(a => a.addEventListener('click', () => { pendingGroupOpen = a.dataset.gotoGroup; }));
+        } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+      }
+    };
+  }
+
+  /** Grupo a abrir automáticamente al entrar a "Grupos y pagos" desde el Resumen. */
+  let pendingGroupOpen = null;
 
   /* ----- Alumno: Mis cursos ----- */
   const ACCESS_MSG = {
@@ -384,7 +569,7 @@
           } catch (err) { showMsg($('#group-msg'), 'danger', esc(err.message)); }
           finally { setBusy(form, false); }
         });
-        loadGroups();
+        loadGroups().then(() => { if (pendingGroupOpen) { openGroup(pendingGroupOpen); pendingGroupOpen = null; } });
       }
     };
   }
@@ -486,7 +671,7 @@
           <div class="alert" id="gd-msg" hidden></div>
         </div>`;
 
-      const act = async (fn) => { try { await fn(); await loadGroups(); await openGroup(id); } catch (err) { showMsg($('#gd-msg'), 'danger', esc(err.message)); } };
+      const act = async (fn) => { try { await fn(); consoleRefresh(); await loadGroups(); await openGroup(id); } catch (err) { showMsg($('#gd-msg'), 'danger', esc(err.message)); } };
       $('#close-group').addEventListener('click', () => { box.innerHTML = ''; });
       $('#ge-form').addEventListener('submit', e => {
         e.preventDefault();
@@ -684,7 +869,7 @@
     return {
       html: `<section class="panel-card"><div class="panel-card-head">
           <h2><i class="fa-solid fa-people-roof" aria-hidden="true"></i> Mis hijos</h2>
-          <a class="btn btn-ghost btn-sm" href="#create-child-card"><i class="fa-solid fa-user-plus"></i> Registrar a mi hijo/a</a></div>
+          <a class="btn btn-ghost btn-sm" href="#registrar-hijo"><i class="fa-solid fa-user-plus"></i> Registrar a mi hijo/a</a></div>
         <div id="children-box"><p class="muted">Cargando…</p></div></section>`,
       init: loadChildren
     };
@@ -891,7 +1076,7 @@
         <p class="muted small">Al aprobar un vínculo, si la cuenta del menor sigue pendiente, también queda aprobada como alumno.</p>`;
       box.querySelectorAll('[data-link-ok]').forEach(b => b.addEventListener('click', async () => {
         const [s, g] = b.dataset.linkOk.split('|');
-        try { await api(`/admin/guardian-links/${s}/${g}/approve`, { method: 'POST' }); loadLinks(); loadRequests(); }
+        try { await api(`/admin/guardian-links/${s}/${g}/approve`, { method: 'POST' }); loadLinks(); loadRequests(); consoleRefresh(); }
         catch (err) { alert(err.message); }
       }));
       box.querySelectorAll('[data-link-no]').forEach(b => b.addEventListener('click', async () => {
@@ -985,7 +1170,7 @@
         </tr>`).join('')}</tbody></table></div>
         <p class="muted small">"Vincular" crea la matrícula aprobada. Si la cuenta seguía pendiente, queda aprobada como alumno.</p>`;
 
-      const run = async fn => { try { await fn(); loadPreEnrollments(); loadGroups(); loadRequests(); } catch (err) { alert(err.message); } };
+      const run = async fn => { try { await fn(); consoleRefresh(); loadPreEnrollments(); loadGroups(); loadRequests(); } catch (err) { alert(err.message); } };
       box.querySelectorAll('[data-pre-ok]').forEach(b => b.addEventListener('click', () => run(() => api(`/admin/pre-enrollments/${b.dataset.preOk}/approve-claim`, { method: 'POST' }))));
       box.querySelectorAll('[data-pre-no]').forEach(b => b.addEventListener('click', () => {
         const notes = prompt('Motivo (se enviará a quien la reclamó):');
@@ -1107,10 +1292,10 @@
   }
 
   /* ----- Formas de ingreso (vincular Google / Microsoft) ----- */
-  async function renderLoginMethods(body) {
+  async function renderLoginMethods(body, inside = false) {
     const holder = document.createElement('section');
     holder.className = 'panel-card';
-    body.after(holder);
+    if (inside) body.appendChild(holder); else body.after(holder);
     let methods, enabled;
     try {
       [methods, enabled] = await Promise.all([api('/auth/login-methods'), api('/auth/providers')]);
@@ -1306,15 +1491,16 @@
       if (role) body.role = role;
       await api(`/admin/account-requests/${id}/${action}`, { method: 'POST', body });
       loadRequests();
-      loadUsers($('#users-q').value);
-      loadLinks();
+      loadUsers(); loadLinks(); consoleRefresh();
     } catch (err) {
       alert(err.message);
     }
   }
 
-  async function loadUsers(q = '') {
+  async function loadUsers(q) {
     const box = $('#users-box');
+    if (!box) return;
+    if (q === undefined) q = ($('#users-q') || {}).value || '';
     try {
       const list = await api(`/admin/users${q ? `?q=${encodeURIComponent(q)}` : ''}`);
       if (!list.length) { box.innerHTML = '<p class="muted">Sin resultados.</p>'; return; }

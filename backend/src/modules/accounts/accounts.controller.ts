@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Req
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AccountsService } from './accounts.service';
-import { CreateAccountRequestDto, ListRequestsQuery, ListUsersQuery, ReasonDto, ReviewDto } from './dto';
+import { ApproveRequestDto, ChangeRoleDto, CreateAccountRequestDto, ListRequestsQuery, ListUsersQuery, ReasonDto, ReviewDto } from './dto';
 import { AllowInactive, CurrentUser, Roles } from '../../common/auth/decorators';
 import type { AuthUser } from '../../common/auth/auth-user';
 
@@ -39,8 +39,8 @@ export class AdminAccountsController {
 
   @HttpCode(200)
   @Post('account-requests/:id/approve')
-  approve(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ReviewDto, @Req() req: Request) {
-    return this.accounts.approve(admin, id, dto.notes, req.ip);
+  approve(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ApproveRequestDto, @Req() req: Request) {
+    return this.accounts.approve(admin, id, dto.notes, dto.role, req.ip);
   }
 
   @HttpCode(200)
@@ -58,6 +58,18 @@ export class AdminAccountsController {
   @Post('users/:id/suspend')
   suspend(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ReasonDto, @Req() req: Request) {
     return this.accounts.suspend(admin, id, dto.reason, req.ip);
+  }
+
+  @HttpCode(200)
+  @Post('users/:id/roles')
+  addRole(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeRoleDto, @Req() req: Request) {
+    return this.accounts.addRole(admin, id, dto.role, dto.reason, req.ip);
+  }
+
+  @HttpCode(200)
+  @Post('users/:id/roles/remove')
+  removeRole(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ChangeRoleDto, @Req() req: Request) {
+    return this.accounts.removeRole(admin, id, dto.role, dto.reason, req.ip);
   }
 
   @HttpCode(200)

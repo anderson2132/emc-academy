@@ -62,3 +62,20 @@ export class ListUsersQuery {
   @MaxLength(100)
   q?: string;
 }
+
+export class ApproveRequestDto extends ReviewDto {
+  /** Rol a otorgar. Si se omite, el que pidió el usuario. El admin decide el rol final. */
+  @IsOptional()
+  @IsEnum(Role)
+  role?: Role;
+}
+
+export class ChangeRoleDto {
+  @IsEnum(Role)
+  role: Role;
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string;
+}

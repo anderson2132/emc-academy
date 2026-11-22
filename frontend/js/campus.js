@@ -1142,7 +1142,7 @@
       <section class="panel-card">
         <h2><i class="fa-solid fa-id-card" aria-hidden="true"></i> Completa tu solicitud</h2>
         ${lastRejected ? `<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation"></i><p>Tu solicitud anterior fue rechazada.${lastRejected.reviewNotes ? ' Motivo: ' + esc(lastRejected.reviewNotes) : ''}</p></div>` : ''}
-        <p class="muted" style="margin-bottom:1.25rem">Indica cómo usarás el campus. Un administrador revisará tu solicitud.</p>
+        <p class="muted" style="margin-bottom:1.25rem">Indica cómo usarás el campus. Un administrador revisará tu solicitud y te asignará el rol que corresponda.</p>
         <form id="request-form" class="form-grid" novalidate>
           <div class="field"><label for="rq-role">Me registro como</label>
             <select id="rq-role" name="role" required>
@@ -1249,7 +1249,7 @@
       const list = await api('/admin/account-requests?status=PENDING');
       if (!list.length) { box.innerHTML = '<p class="muted">No hay solicitudes pendientes.</p>'; return; }
       box.innerHTML = `<div class="table-wrap"><table class="table">
-        <thead><tr><th>Nombre</th><th>Correo</th><th>Solicita</th><th>Datos</th><th>Fecha</th><th></th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Correo</th><th>Rol a asignar</th><th>Datos</th><th>Fecha</th><th></th></tr></thead>
         <tbody>${list.map(r => {
           const u = r.user;
           const birth = u.studentProfile && u.studentProfile.birthDate;
@@ -1259,7 +1259,9 @@
               ? `${esc(u.guardianProfile.documentType)} ${esc(u.guardianProfile.documentNumber)}` : '';
           return `<tr>
             <td>${esc(u.fullName)}</td><td>${esc(u.email || u.username)}</td>
-            <td><span class="badge">${ROLE_LABEL[r.requestedRole]}</span></td>
+            <td><select class="input-sm role-select" data-role-for="${r.id}" aria-label="Rol a asignar">
+              ${Object.entries(ROLE_LABEL).map(([v, l]) => `<option value="${v}" ${v === r.requestedRole ? 'selected' : ''}>${l}${v === r.requestedRole ? ' (pedido)' : ''}</option>`).join('')}
+            </select></td>
             <td class="muted">${esc(u.phone || '')}${extra ? '<br>' + extra : ''}</td>
             <td class="muted">${fmtDate(r.createdAt)}</td>
             <td class="actions">
@@ -1268,7 +1270,11 @@
             </td></tr>`;
         }).join('')}</tbody></table></div>`;
 
-      box.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => review(b.dataset.approve, 'approve')));
+      box.querySelectorAll('[data-approve]').forEach(b => b.addEventListener('click', () => {
+        const role = box.querySelector(`[data-role-for="${b.dataset.approve}"]`).value;
+        if (role === 'ADMIN' && !confirm('¿Aprobar esta cuenta como ADMINISTRADOR? Tendrá acceso total al campus.')) return;
+        review(b.dataset.approve, 'approve', undefined, role);
+      }));
       box.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', () => {
         const notes = prompt('Motivo del rechazo (se enviará al usuario):');
         if (notes !== null) review(b.dataset.reject, 'reject', notes.trim());
@@ -1278,9 +1284,12 @@
     }
   }
 
-  async function review(id, action, notes) {
+  async function review(id, action, notes, role) {
     try {
-      await api(`/admin/account-requests/${id}/${action}`, { method: 'POST', body: notes ? { notes } : {} });
+      const body = {};
+      if (notes) body.notes = notes;
+      if (role) body.role = role;
+      await api(`/admin/account-requests/${id}/${action}`, { method: 'POST', body });
       loadRequests();
       loadUsers($('#users-q').value);
       loadLinks();
@@ -1301,10 +1310,33 @@
           const action = u.status === 'ACTIVE'
             ? `<button class="btn btn-ghost btn-xs" data-suspend="${u.id}">Suspender</button>`
             : u.status === 'SUSPENDED' ? `<button class="btn btn-ghost btn-xs" data-reactivate="${u.id}">Reactivar</button>` : '';
+          const has = new Set(u.roles.map(r => r.role));
+          const addable = Object.keys(ROLE_LABEL).filter(r => !has.has(r));
           return `<tr><td>${esc(u.fullName)}</td><td>${esc(u.email || u.username)}</td>
-            <td>${u.roles.map(r => `<span class="badge">${ROLE_LABEL[r.role]}</span>`).join(' ') || '<span class="muted">—</span>'}</td>
+            <td><span class="role-chips">${u.roles.map(r => `<span class="badge">${ROLE_LABEL[r.role]}${u.roles.length > 1 ? ` <button class="link-btn" data-rm-role="${u.id}|${r.role}" aria-label="Quitar rol ${ROLE_LABEL[r.role]}">✕</button>` : ''}</span>`).join(' ') || '<span class="muted">—</span>'}
+              ${u.status === 'ACTIVE' && addable.length ? `<select class="input-sm role-add" data-add-role="${u.id}" aria-label="Agregar rol"><option value="">+ Rol</option>${addable.map(r => `<option value="${r}">${ROLE_LABEL[r]}</option>`).join('')}</select>` : ''}</span></td>
             <td><span class="status-pill st-${type}">${label}</span></td><td class="actions">${action}</td></tr>`;
-        }).join('')}</tbody></table></div>`;
+        }).join('')}</tbody></table></div>
+        <p class="muted small">Con <strong>+ Rol</strong> das un rol (incluido Administrador); con ✕ lo quitas. Siempre queda al menos un rol y al menos un administrador activo.</p>`;
+
+      const changeRole = async (userId, role, add) => {
+        const label = ROLE_LABEL[role];
+        if (role === 'ADMIN' && add && !confirm('¿Dar el rol de ADMINISTRADOR? Tendrá acceso total al campus.')) return false;
+        const reason = prompt(`${add ? 'Motivo para dar' : 'Motivo para quitar'} el rol de ${label}:`);
+        if (!reason || reason.trim().length < 3) return false;
+        try {
+          await api(`/admin/users/${userId}/roles${add ? '' : '/remove'}`, { method: 'POST', body: { role, reason: reason.trim() } });
+          return true;
+        } catch (err) { alert(err.message); return false; }
+      };
+      box.querySelectorAll('[data-add-role]').forEach(s => s.addEventListener('change', async () => {
+        if (s.value) await changeRole(s.dataset.addRole, s.value, true);
+        loadUsers($('#users-q').value);
+      }));
+      box.querySelectorAll('[data-rm-role]').forEach(b => b.addEventListener('click', async () => {
+        const [userId, role] = b.dataset.rmRole.split('|');
+        if (await changeRole(userId, role, false)) loadUsers($('#users-q').value);
+      }));
 
       const act = async (id, kind) => {
         const reason = prompt(kind === 'suspend' ? 'Motivo de la suspensión:' : 'Motivo de la reactivación:');

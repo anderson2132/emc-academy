@@ -7,6 +7,7 @@ import { AuthService } from '../auth/auth.service';
 import type { AuthUser } from '../../common/auth/auth-user';
 import type { RequestStatus, Role, UserStatus } from '../../generated/prisma/enums';
 import type { CreateAccountRequestDto } from './dto';
+import { decideRoleChange, ROLE_CHANGE_MESSAGES } from '../../common/access/role-change.policy';
 
 const ROLE_LABEL = { STUDENT: 'alumno', GUARDIAN: 'apoderado', TEACHER: 'docente', ADMIN: 'administrador' } as const;
 
@@ -81,8 +82,10 @@ export class AccountsService {
     });
   }
 
-  async approve(admin: AuthUser, requestId: string, notes: string | undefined, ip?: string) {
+  /** Aprueba la cuenta. El admin decide el rol final (puede ser distinto al que pidió el usuario). */
+  async approve(admin: AuthUser, requestId: string, notes: string | undefined, role: Role | undefined, ip?: string) {
     const request = await this.findPending(requestId);
+    const granted = role ?? request.requestedRole;
 
     const result = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.accountRequest.update({
@@ -90,14 +93,15 @@ export class AccountsService {
         data: { status: 'APPROVED', reviewedById: admin.id, reviewedAt: new Date(), reviewNotes: notes },
       });
       await tx.userRole.upsert({
-        where: { userId_role: { userId: request.userId, role: request.requestedRole } },
-        create: { userId: request.userId, role: request.requestedRole },
+        where: { userId_role: { userId: request.userId, role: granted } },
+        create: { userId: request.userId, role: granted },
         update: {},
       });
+      await this.ensureProfile(tx, request.userId, request.user.fullName, granted);
       await tx.user.update({ where: { id: request.userId }, data: { status: 'ACTIVE' } });
       await this.audit.log({
         actorId: admin.id, action: 'account_request.approve', entity: 'account_request', entityId: request.id,
-        after: { userId: request.userId, role: request.requestedRole }, ip,
+        after: { userId: request.userId, requestedRole: request.requestedRole, grantedRole: granted }, ip,
       }, tx);
       return updated;
     });
@@ -106,10 +110,39 @@ export class AccountsService {
       await this.mail.send({
         to: request.user.email,
         subject: 'Tu cuenta de EMC Academy fue aprobada',
-        text: `Hola ${request.user.fullName}, tu cuenta de ${ROLE_LABEL[request.requestedRole]} fue aprobada. Ya puedes ingresar al Campus Virtual.`,
+        text: `Hola ${request.user.fullName}, tu cuenta fue aprobada con el rol de ${ROLE_LABEL[granted]}. Ya puedes ingresar al Campus Virtual.`,
       });
     }
     return result;
+  }
+
+  /** Dar un rol a una cuenta activa (incluido ADMIN). */
+  async addRole(admin: AuthUser, userId: string, role: Role, reason: string, ip?: string) {
+    const target = await this.loadForRoleChange(userId);
+    await this.checkRoleChange(admin, target, 'ADD', role);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userRole.create({ data: { userId, role } });
+      await this.ensureProfile(tx, userId, target.fullName, role);
+      await this.audit.log({ actorId: admin.id, action: 'user.add_role', entity: 'user', entityId: userId, before: { roles: target.roles }, after: { role, reason }, ip }, tx);
+    });
+    await this.mail.notify([target.email], 'Cambio de rol en EMC Academy',
+      `Hola ${target.fullName}, ahora tienes el rol de ${ROLE_LABEL[role]} en el Campus Virtual.`);
+    return { ok: true };
+  }
+
+  /** Quitar un rol. Los datos (perfil, matrículas, grupos) se conservan; solo deja de tener acceso por ese rol. */
+  async removeRole(admin: AuthUser, userId: string, role: Role, reason: string, ip?: string) {
+    const target = await this.loadForRoleChange(userId);
+    await this.checkRoleChange(admin, target, 'REMOVE', role);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userRole.delete({ where: { userId_role: { userId, role } } });
+      await this.audit.log({ actorId: admin.id, action: 'user.remove_role', entity: 'user', entityId: userId, before: { roles: target.roles }, after: { removed: role, reason }, ip }, tx);
+    });
+    // Quitar ADMIN cierra sus sesiones para que el cambio no dependa de que cierre el navegador.
+    if (role === 'ADMIN') await this.auth.revokeAllSessions(userId);
+    await this.mail.notify([target.email], 'Cambio de rol en EMC Academy',
+      `Hola ${target.fullName}, ya no tienes el rol de ${ROLE_LABEL[role]} en el Campus Virtual.`);
+    return { ok: true };
   }
 
   async reject(admin: AuthUser, requestId: string, notes: string | undefined, ip?: string) {
@@ -173,6 +206,31 @@ export class AccountsService {
   }
 
   // ───────────── Internos ─────────────
+
+  private async loadForRoleChange(userId: string) {
+    const u = await this.prisma.user.findFirst({ where: { id: userId, deletedAt: null }, include: { roles: true } });
+    if (!u) throw new NotFoundException('Usuario no encontrado.');
+    return { id: u.id, email: u.email, fullName: u.fullName, status: u.status, roles: u.roles.map((r) => r.role) };
+  }
+
+  private async checkRoleChange(admin: AuthUser, target: Awaited<ReturnType<AccountsService['loadForRoleChange']>>, action: 'ADD' | 'REMOVE', role: Role) {
+    const activeAdminCount = await this.prisma.user.count({ where: { status: 'ACTIVE', deletedAt: null, roles: { some: { role: 'ADMIN' } } } });
+    const d = decideRoleChange({ action, role, actorId: admin.id, target, activeAdminCount });
+    if (!d.allowed) {
+      const body = { code: d.reason, message: ROLE_CHANGE_MESSAGES[d.reason] };
+      throw d.reason === 'ALREADY_HAS_ROLE' || d.reason === 'ROLE_NOT_ASSIGNED' ? new ConflictException(body) : new BadRequestException(body);
+    }
+  }
+
+  /** Perfil mínimo para el rol, si no existe (el admin puede dar un rol distinto al solicitado). */
+  private async ensureProfile(tx: PrismaTx, userId: string, fullName: string, role: Role): Promise<void> {
+    if (role === 'STUDENT') await tx.studentProfile.upsert({ where: { userId }, create: { userId }, update: {} });
+    if (role === 'GUARDIAN') await tx.guardianProfile.upsert({ where: { userId }, create: { userId }, update: {} });
+    if (role === 'TEACHER') {
+      const slug = `${slugify(fullName) || 'docente'}-${randomBytes(3).toString('hex')}`;
+      await tx.teacherProfile.upsert({ where: { userId }, create: { userId, slug }, update: {} });
+    }
+  }
 
   private async findPending(requestId: string) {
     const request = await this.prisma.accountRequest.findUnique({

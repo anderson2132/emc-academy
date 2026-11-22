@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, P
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AcademicService } from './academic.service';
-import { AssignUserDto, CreateGroupDto, UpdateCourseDto, UpdateGroupDto } from './dto';
+import { AssignUserDto, CreateGroupDto, DeleteDto, UpdateCourseDto, UpdateGroupDto } from './dto';
 import { CurrentUser, Roles } from '../../common/auth/decorators';
 import type { AuthUser } from '../../common/auth/auth-user';
 
@@ -38,9 +38,26 @@ export class AdminAcademicController {
     return this.academic.updateGroup(admin, id, dto, req.ip);
   }
 
-  @Delete('groups/:id')
-  deleteGroup(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
-    return this.academic.deleteGroup(admin, id, req.ip);
+  @Get('groups/:id/deletion-impact')
+  groupImpact(@Param('id', ParseUUIDPipe) id: string) {
+    return this.academic.groupDeletionImpact(id);
+  }
+
+  @HttpCode(200)
+  @Post('groups/:id/delete')
+  deleteGroup(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: DeleteDto, @Req() req: Request) {
+    return this.academic.deleteGroup(admin, id, dto, req.ip);
+  }
+
+  @Get('courses/:id/deletion-impact')
+  courseImpact(@Param('id', ParseUUIDPipe) id: string) {
+    return this.academic.courseDeletionImpact(id);
+  }
+
+  @HttpCode(200)
+  @Post('courses/:id/delete')
+  deleteCourse(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: DeleteDto, @Req() req: Request) {
+    return this.academic.deleteCourse(admin, id, dto, req.ip);
   }
 
   @Post('groups')

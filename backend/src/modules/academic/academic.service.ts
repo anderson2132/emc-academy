@@ -10,7 +10,8 @@ import {
   contentDeadline,
 } from '../../common/access/course-access.policy';
 import { Prisma } from '../../generated/prisma/client';
-import type { CreateGroupDto, UpdateCourseDto, UpdateGroupDto } from './dto';
+import type { CreateGroupDto, DeleteDto, UpdateCourseDto, UpdateGroupDto } from './dto';
+import type { PrismaTx } from '../../prisma/prisma.service';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** 16 clases, 2 por semana → 8 semanas. */
@@ -275,21 +276,76 @@ export class AcademicService {
   }
 
   /** Eliminar (borrado lógico) solo si el grupo no tiene alumnos ni solicitudes; si los tiene, se cancela. */
-  async deleteGroup(admin: AuthUser, groupId: string, ip?: string) {
-    await this.findGroup(groupId);
-    const [active, pre] = await Promise.all([
-      this.prisma.enrollment.count({ where: { groupId, status: { in: ['APPROVED', 'REQUESTED', 'PENDING_GUARDIAN'] } } }),
-      this.prisma.preEnrollment.count({ where: { groupId, status: { in: ['PENDING', 'CLAIMED'] } } }),
+  /** Lo que se perdería al eliminar: para mostrarlo antes de confirmar. */
+  async deletionImpact(groupIds: string[]) {
+    const [students, paid] = await Promise.all([
+      this.prisma.enrollment.count({ where: { groupId: { in: groupIds }, status: 'APPROVED' } }),
+      this.prisma.enrollment.count({ where: { groupId: { in: groupIds }, status: 'APPROVED', payments: { some: { voidedAt: null } } } }),
     ]);
-    if (active || pre) {
-      throw new ConflictException({
-        code: 'GROUP_HAS_STUDENTS',
-        message: 'El grupo tiene alumnos, solicitudes o prematrículas. Cámbialo a estado "Cancelado" en lugar de eliminarlo.',
-      });
+    return { groups: groupIds.length, students, paid };
+  }
+
+  async groupDeletionImpact(groupId: string) {
+    await this.findGroup(groupId);
+    return this.deletionImpact([groupId]);
+  }
+
+  /**
+   * Eliminar grupo (borrado lógico), aunque tenga alumnos. Hay que escribir su código para confirmar.
+   * Los alumnos pierden el acceso; matrículas, pagos y auditoría se conservan.
+   */
+  async deleteGroup(admin: AuthUser, groupId: string, dto: DeleteDto, ip?: string) {
+    const g = await this.findGroup(groupId);
+    if (dto.confirm.trim().toUpperCase() !== g.code.toUpperCase()) {
+      throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: `Para confirmar escribe exactamente el código del grupo: ${g.code}` });
     }
-    await this.prisma.academicGroup.update({ where: { id: groupId }, data: { deletedAt: new Date() } });
-    await this.audit.log({ actorId: admin.id, action: 'group.delete', entity: 'academic_group', entityId: groupId, ip });
-    return { ok: true };
+    const impact = await this.deletionImpact([groupId]);
+    await this.prisma.$transaction(async (tx) => {
+      await this.softDeleteGroups(tx, [groupId]);
+      await this.audit.log({
+        actorId: admin.id, action: 'group.delete', entity: 'academic_group', entityId: groupId,
+        before: { code: g.code, ...impact }, after: { reason: dto.reason }, ip,
+      }, tx);
+    });
+    return { ok: true, ...impact };
+  }
+
+  async courseDeletionImpact(courseId: string) {
+    const c = await this.prisma.course.findFirst({ where: { id: courseId, deletedAt: null }, include: { groups: { where: { deletedAt: null }, select: { id: true } } } });
+    if (!c) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Curso no encontrado.' });
+    return this.deletionImpact(c.groups.map((x) => x.id));
+  }
+
+  /** Eliminar curso junto con todos sus grupos (borrado lógico). Hay que escribir su nombre para confirmar. */
+  async deleteCourse(admin: AuthUser, courseId: string, dto: DeleteDto, ip?: string) {
+    const c = await this.prisma.course.findFirst({ where: { id: courseId, deletedAt: null }, include: { groups: { where: { deletedAt: null }, select: { id: true } } } });
+    if (!c) throw new NotFoundException({ code: 'COURSE_NOT_FOUND', message: 'Curso no encontrado.' });
+    if (dto.confirm.trim().toLowerCase() !== c.name.trim().toLowerCase()) {
+      throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: `Para confirmar escribe exactamente el nombre del curso: ${c.name}` });
+    }
+    const groupIds = c.groups.map((x) => x.id);
+    const impact = await this.deletionImpact(groupIds);
+    await this.prisma.$transaction(async (tx) => {
+      await this.softDeleteGroups(tx, groupIds);
+      await tx.course.update({ where: { id: courseId }, data: { deletedAt: new Date(), status: 'ARCHIVED' } });
+      await this.audit.log({
+        actorId: admin.id, action: 'course.delete', entity: 'course', entityId: courseId,
+        before: { name: c.name, slug: c.slug, ...impact }, after: { reason: dto.reason }, ip,
+      }, tx);
+    });
+    return { ok: true, ...impact };
+  }
+
+  /** Oculta los grupos y cierra lo que estaba en curso (solicitudes y prematrículas). */
+  private async softDeleteGroups(tx: PrismaTx, groupIds: string[]) {
+    if (!groupIds.length) return;
+    const now = new Date();
+    await tx.academicGroup.updateMany({ where: { id: { in: groupIds } }, data: { deletedAt: now } });
+    await tx.enrollment.updateMany({
+      where: { groupId: { in: groupIds }, status: { in: ['REQUESTED', 'PENDING_GUARDIAN'] } },
+      data: { status: 'REJECTED', reviewNotes: 'El grupo fue eliminado.' },
+    });
+    await tx.preEnrollment.updateMany({ where: { groupId: { in: groupIds }, status: { in: ['PENDING', 'CLAIMED'] } }, data: { status: 'CANCELLED' } });
   }
 
   // ───────────── Cursos y temario (admin) ─────────────

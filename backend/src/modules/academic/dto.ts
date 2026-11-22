@@ -130,3 +130,16 @@ export class UpdateCourseDto {
   @MaxLength(200, { each: true })
   modules?: string[];
 }
+
+/** Confirmación de borrado: escribir el código del grupo o el nombre del curso, más un motivo. */
+export class DeleteDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  confirm: string;
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string;
+}

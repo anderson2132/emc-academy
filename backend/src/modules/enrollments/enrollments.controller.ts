@@ -3,12 +3,15 @@ import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { EnrollmentsService } from './enrollments.service';
 import { PreEnrollmentsService } from './pre-enrollments.service';
+import { PaymentsService } from './payments.service';
 import {
   ApproveEnrollmentDto,
   CreatePreEnrollmentDto,
   LinkPreEnrollmentDto,
   ListEnrollmentsQuery,
   ListPreEnrollmentsQuery,
+  MarkPaidDto,
+  VoidPaymentDto,
   NotesDto,
 } from './dto';
 import { AllowInactive, CurrentUser, Roles } from '../../common/auth/decorators';
@@ -98,5 +101,25 @@ export class MePreEnrollmentsController {
   @Post(':id/claim')
   claim(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
     return this.pre.claim(user, id, req.ip);
+  }
+}
+
+/** Pago realizado / pendiente de una matrícula (solo ADMIN). */
+@ApiTags('admin · pagos')
+@Roles('ADMIN')
+@Controller('admin/enrollments')
+export class AdminPaymentsController {
+  constructor(private readonly payments: PaymentsService) {}
+
+  @HttpCode(200)
+  @Post(':id/payment')
+  markPaid(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: MarkPaidDto, @Req() req: Request) {
+    return this.payments.markPaid(admin, id, dto, req.ip);
+  }
+
+  @HttpCode(200)
+  @Post(':id/payment/void')
+  markPending(@CurrentUser() admin: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: VoidPaymentDto, @Req() req: Request) {
+    return this.payments.markPending(admin, id, dto.reason, req.ip);
   }
 }

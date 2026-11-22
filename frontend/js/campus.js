@@ -39,6 +39,7 @@
     FINISHED: ['Terminado', 'muted'],
     CANCELLED: ['Cancelado', 'danger']
   };
+  const PAY_METHOD = { YAPE: 'Yape', PLIN: 'Plin', TRANSFER: 'Transferencia', CASH: 'Efectivo', OTHER: 'Otro' };
   const COURSE_STATUS = { DRAFT: ['Borrador', 'warning'], PUBLISHED: ['Publicado', 'success'], ARCHIVED: ['Archivado', 'muted'] };
   const PRE_STATUS = { PENDING: ['Esperando cuenta', 'info'], CLAIMED: ['Reclamada: verificar', 'warning'], LINKED: ['Vinculada', 'success'], CANCELLED: ['Anulada', 'muted'] };
   const CONSENT_TEXT = 'Declaro ser padre, madre o tutor legal del menor y autorizo a EMC Academy a registrarlo y a tratar sus datos personales con fines académicos. <span class="muted">(Texto provisional.)</span>';
@@ -459,8 +460,20 @@
           ${g.students.length ? `<div class="table-wrap"><table class="table">
             <thead><tr><th>Nombre</th><th>Correo</th><th>Pago</th><th></th></tr></thead>
             <tbody>${g.students.map(s => `<tr><td>${esc(s.fullName)}</td><td class="muted">${esc(s.email || s.username || '')}</td>
-              <td>${s.paid ? '<span class="status-pill st-success">Pagado</span>' : `<span class="status-pill st-warning">Pendiente · ${soles(s.priceCents - s.paidCents)}</span>`}</td>
-              <td class="actions"><button class="btn btn-ghost btn-xs" data-rm-student="${s.id}">Quitar</button></td></tr>`).join('')}</tbody></table></div>`
+              <td>${s.paid
+                ? `<span class="status-pill st-success">Pago realizado</span>${s.lastPayment ? `<br><span class="muted small">${PAY_METHOD[s.lastPayment.method] || s.lastPayment.method} · ${fmtDay(s.lastPayment.paidOn)}${s.lastPayment.operationNumber ? ' · Op. ' + esc(s.lastPayment.operationNumber) : ''}</span>` : ''}
+                   <br><button class="link-btn pay-link" data-pay-void="${s.enrollmentId}" data-name="${esc(s.fullName)}">Marcar pendiente</button>`
+                : `<span class="status-pill st-warning">Pendiente de pago · ${soles(s.priceCents - s.paidCents)}</span>
+                   <br><button class="btn btn-primary btn-xs pay-btn" data-pay="${s.enrollmentId}" data-name="${esc(s.fullName)}" data-amount="${s.priceCents - s.paidCents}">Marcar pagado</button>`}</td>
+              <td class="actions"><button class="btn btn-ghost btn-xs" data-rm-student="${s.id}">Quitar</button></td></tr>`).join('')}</tbody></table></div>
+            <form id="pay-form" class="form-grid group-form" hidden novalidate>
+              <p class="full" id="pay-title"></p>
+              <div class="field"><label for="pay-method">Método</label><select id="pay-method" name="method" required>${Object.entries(PAY_METHOD).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div>
+              <div class="field"><label for="pay-date">Fecha del pago</label><input id="pay-date" name="paidOn" type="date" required></div>
+              <div class="field"><label for="pay-op">N° de operación <span class="muted">(opcional)</span></label><input id="pay-op" name="operationNumber" maxlength="60"></div>
+              <div class="field"><label for="pay-notes">Nota <span class="muted">(opcional)</span></label><input id="pay-notes" name="notes" maxlength="500"></div>
+              <div class="full"><button class="btn btn-primary btn-sm" type="submit">Confirmar pago realizado</button> <button class="btn btn-ghost btn-sm" type="button" id="pay-cancel">Cancelar</button></div>
+            </form>`
             : '<p class="muted">Aún no hay alumnos matriculados.</p>'}
           <div class="assign-row">
             <select id="s-select" aria-label="Alumno">${sOptions.length ? sOptions.map(opt).join('') : '<option value="">No hay más alumnos activos</option>'}</select>
@@ -500,6 +513,34 @@
       $('#t-add').addEventListener('click', () => act(() => api(`/admin/groups/${id}/teachers`, { method: 'POST', body: { userId: $('#t-select').value } })));
       $('#s-add').addEventListener('click', () => act(() => api(`/admin/groups/${id}/students`, { method: 'POST', body: { userId: $('#s-select').value } })));
       box.querySelectorAll('[data-rm-teacher]').forEach(b => b.addEventListener('click', () => act(() => api(`/admin/groups/${id}/teachers/${b.dataset.rmTeacher}`, { method: 'DELETE' }))));
+      // Pago realizado / pendiente (pago único por el saldo completo).
+      const payForm = $('#pay-form');
+      if (payForm) {
+        let payId = null;
+        box.querySelectorAll('[data-pay]').forEach(b => b.addEventListener('click', () => {
+          payId = b.dataset.pay;
+          $('#pay-title').innerHTML = `Registrar pago de <strong>${esc(b.dataset.name)}</strong>: <strong>${soles(Number(b.dataset.amount))}</strong>`;
+          payForm.reset();
+          payForm.paidOn.value = new Date(Date.now() - 5 * 3600 * 1000).toISOString().slice(0, 10);
+          payForm.paidOn.max = payForm.paidOn.value;
+          payForm.hidden = false;
+          payForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }));
+        $('#pay-cancel').addEventListener('click', () => { payForm.hidden = true; });
+        payForm.addEventListener('submit', e => {
+          e.preventDefault();
+          if (!payForm.reportValidity() || !payId) return;
+          const body = { method: payForm.method.value, paidOn: payForm.paidOn.value };
+          if (payForm.operationNumber.value.trim()) body.operationNumber = payForm.operationNumber.value.trim();
+          if (payForm.notes.value.trim()) body.notes = payForm.notes.value.trim();
+          act(() => api(`/admin/enrollments/${payId}/payment`, { method: 'POST', body }));
+        });
+        box.querySelectorAll('[data-pay-void]').forEach(b => b.addEventListener('click', () => {
+          const reason = prompt(`¿Volver a "pendiente de pago" a ${b.dataset.name}? Escribe el motivo:`);
+          if (!reason || reason.trim().length < 3) return;
+          act(() => api(`/admin/enrollments/${b.dataset.payVoid}/payment/void`, { method: 'POST', body: { reason: reason.trim() } }));
+        }));
+      }
       box.querySelectorAll('[data-rm-student]').forEach(b => b.addEventListener('click', () => {
         if (confirm('¿Quitar a este alumno del grupo? Perderá el acceso al curso.')) act(() => api(`/admin/groups/${id}/students/${b.dataset.rmStudent}`, { method: 'DELETE' }));
       }));

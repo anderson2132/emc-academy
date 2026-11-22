@@ -1,6 +1,6 @@
 import { IsDateString, IsEmail, IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
-import { EnrollmentStatus, PreEnrollmentStatus } from '../../generated/prisma/enums';
+import { EnrollmentStatus, PaymentMethod, PreEnrollmentStatus } from '../../generated/prisma/enums';
 
 export class ListEnrollmentsQuery {
   @IsOptional()
@@ -74,4 +74,31 @@ export class ListPreEnrollmentsQuery {
 export class LinkPreEnrollmentDto {
   @IsUUID()
   userId: string;
+}
+
+export class MarkPaidDto {
+  @IsEnum(PaymentMethod, { message: 'Método de pago inválido' })
+  method: PaymentMethod;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  operationNumber?: string;
+
+  /** Fecha del pago (AAAA-MM-DD). Por defecto, hoy. */
+  @IsOptional()
+  @IsDateString({ strict: true }, { message: 'Fecha de pago inválida' })
+  paidOn?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+}
+
+export class VoidPaymentDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string;
 }

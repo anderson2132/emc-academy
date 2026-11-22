@@ -117,7 +117,11 @@ export class AcademicService {
           orderBy: { createdAt: 'asc' },
           include: {
             student: { include: { user: { select: { id: true, fullName: true, email: true, username: true } } } },
-            payments: { where: { voidedAt: null }, select: { amountCents: true } },
+            payments: {
+              where: { voidedAt: null },
+              orderBy: { paidOn: 'desc' },
+              select: { amountCents: true, method: true, operationNumber: true, paidOn: true },
+            },
           },
         },
         preEnrollments: {
@@ -155,6 +159,9 @@ export class AcademicService {
           priceCents: e.priceCents - e.discountCents,
           paidCents,
           paid: isPaid({ priceCents: e.priceCents, discountCents: e.discountCents, paidCents }),
+          lastPayment: e.payments[0]
+            ? { method: e.payments[0].method, operationNumber: e.payments[0].operationNumber, paidOn: isoDay(e.payments[0].paidOn) }
+            : null,
         };
       }),
     };

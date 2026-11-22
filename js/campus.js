@@ -445,7 +445,7 @@
               <div class="field full"><label for="ge-zoom">Enlace de Zoom</label><input id="ge-zoom" name="zoomUrl" type="url" value="${esc(g.zoomUrl || '')}" placeholder="https://zoom.us/j/..."></div>
               <p class="full muted small">Solo reciben solicitudes los grupos con <strong>Inscripciones abiertas</strong>. Al pasar a Cancelado o Terminado se cierran las solicitudes y prematrículas en curso.</p>
               <div class="full"><button class="btn btn-primary btn-sm" type="submit">Guardar cambios</button>
-                <button class="btn btn-ghost btn-sm" type="button" id="ge-delete"><i class="fa-solid fa-trash" aria-hidden="true"></i> Eliminar grupo</button></div>
+                <button class="btn btn-ghost btn-sm btn-danger-ghost" type="button" id="ge-delete"><i class="fa-solid fa-trash" aria-hidden="true"></i> Eliminar grupo</button></div>
             </form>
           </details>
 
@@ -503,9 +503,17 @@
         }));
       });
       $('#ge-delete').addEventListener('click', async () => {
-        if (!confirm('¿Eliminar este grupo? Solo se puede si no tiene alumnos, solicitudes ni prematrículas.')) return;
         try {
-          await api(`/admin/groups/${id}`, { method: 'DELETE' });
+          const impact = await api(`/admin/groups/${id}/deletion-impact`);
+          const done = await confirmDanger({
+            title: `Eliminar el grupo ${g.code}`,
+            what: `el grupo <strong>${esc(g.code)}</strong> de ${esc(g.course.name)}`,
+            impact,
+            expect: g.code,
+            expectLabel: 'el código del grupo',
+            run: body => api(`/admin/groups/${id}/delete`, { method: 'POST', body })
+          });
+          if (!done) return;
           box.innerHTML = '';
           loadGroups();
         } catch (err) { showMsg($('#gd-msg'), 'danger', esc(err.message)); }
@@ -546,6 +554,59 @@
       }));
       box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  /* ----- Ventana de advertencia para eliminar (grupo o curso) -----
+     Muestra lo que se pierde, exige escribir el código/nombre y un motivo.
+     Resuelve true si se eliminó; false si se canceló. */
+  function confirmDanger({ title, what, impact, expect, expectLabel, run, note }) {
+    return new Promise(resolve => {
+      const prevFocus = document.activeElement;
+      const wrap = document.createElement('div');
+      wrap.className = 'modal-backdrop';
+      const lines = [];
+      if (impact.groups > 1) lines.push(`<li><strong>${impact.groups}</strong> grupos</li>`);
+      if (impact.students) lines.push(`<li><strong>${impact.students}</strong> alumno${impact.students === 1 ? '' : 's'} matriculado${impact.students === 1 ? '' : 's'} <strong>perderá${impact.students === 1 ? '' : 'n'} el acceso</strong> al curso</li>`);
+      if (impact.paid) lines.push(`<li><strong>${impact.paid}</strong> con pago registrado (el pago queda en el historial, no se devuelve automáticamente)</li>`);
+      wrap.innerHTML = `
+        <div class="modal danger-modal" role="alertdialog" aria-modal="true" aria-labelledby="dz-title" aria-describedby="dz-desc">
+          <div class="danger-head"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><h3 id="dz-title">${esc(title)}</h3></div>
+          <div id="dz-desc">
+            <p>Vas a eliminar ${what}. Dejará de verse en el campus.</p>${note ? `<p class="small"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ${note}</p>` : ''}
+            ${lines.length ? `<div class="alert alert-danger"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i><div><p><strong>Esto afectará a:</strong></p><ul class="impact-list">${lines.join('')}</ul></div></div>`
+              : '<p class="muted">No tiene alumnos matriculados.</p>'}
+            <p class="muted small">Las matrículas, pagos y la auditoría se conservan en la base de datos, pero no se puede deshacer desde el panel.</p>
+          </div>
+          <form class="danger-form" novalidate>
+            <div class="field"><label for="dz-confirm">Para confirmar, escribe ${esc(expectLabel)}: <strong class="nowrap">${esc(expect)}</strong></label>
+              <input id="dz-confirm" name="confirm" autocomplete="off" required></div>
+            <div class="field"><label for="dz-reason">Motivo</label><input id="dz-reason" name="reason" minlength="3" maxlength="500" required placeholder="Ej.: grupo creado por error"></div>
+            <div class="alert" id="dz-msg" hidden></div>
+            <div class="danger-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-dz-cancel>Cancelar</button>
+              <button type="submit" class="btn btn-danger btn-sm" disabled><i class="fa-solid fa-trash" aria-hidden="true"></i> Sí, eliminar</button>
+            </div>
+          </form>
+        </div>`;
+      document.body.appendChild(wrap);
+      const f = wrap.querySelector('form');
+      const submit = f.querySelector('[type="submit"]');
+      const close = ok => { wrap.remove(); document.removeEventListener('keydown', onKey); prevFocus && prevFocus.focus && prevFocus.focus(); resolve(ok); };
+      const onKey = e => { if (e.key === 'Escape') close(false); };
+      const matches = () => f.confirm.value.trim().toLowerCase() === String(expect).trim().toLowerCase() && f.reason.value.trim().length >= 3;
+      f.addEventListener('input', () => { submit.disabled = !matches(); });
+      wrap.querySelector('[data-dz-cancel]').addEventListener('click', () => close(false));
+      wrap.addEventListener('click', e => { if (e.target === wrap) close(false); });
+      document.addEventListener('keydown', onKey);
+      f.addEventListener('submit', async e => {
+        e.preventDefault();
+        if (!matches()) return;
+        setBusy(f, true);
+        try { await run({ confirm: f.confirm.value.trim(), reason: f.reason.value.trim() }); close(true); }
+        catch (err) { showMsg(wrap.querySelector('#dz-msg'), 'danger', esc(err.message)); setBusy(f, false); submit.disabled = !matches(); }
+      });
+      f.confirm.focus();
+    });
   }
 
   /* ----- Temario de un curso ----- */
@@ -972,9 +1033,28 @@
           <td class="muted">${c.line === 'KIDS_TEENS' ? `Kids &amp; Teens · nivel ${c.level}` : 'Programa'}</td>
           <td>${soles(c.priceCents)}</td>
           <td>${pill(COURSE_STATUS[c.status] || [c.status, 'info'])}</td>
-          <td class="actions"><button class="btn btn-ghost btn-xs" data-edit-course="${c.id}">Editar</button></td>
+          <td class="actions"><button class="btn btn-ghost btn-xs" data-edit-course="${c.id}">Editar</button>
+            <button class="btn btn-ghost btn-xs btn-danger-ghost" data-del-course="${c.id}" data-name="${esc(c.name)}"><i class="fa-solid fa-trash" aria-hidden="true"></i> Eliminar</button></td>
         </tr>`).join('')}</tbody></table></div>`;
       box.querySelectorAll('[data-edit-course]').forEach(b => b.addEventListener('click', () => editCourse(b.dataset.editCourse)));
+      box.querySelectorAll('[data-del-course]').forEach(b => b.addEventListener('click', async () => {
+        const cid = b.dataset.delCourse, name = b.dataset.name;
+        try {
+          const impact = await api(`/admin/courses/${cid}/deletion-impact`);
+          const done = await confirmDanger({
+            title: `Eliminar el curso ${name}`,
+            what: `el curso <strong>${esc(name)}</strong> y <strong>todos sus grupos</strong>`,
+            impact,
+            expect: name,
+            expectLabel: 'el nombre del curso',
+            note: 'El portal público muestra los cursos desde su propio archivo: para retirarlo de la web hay que quitarlo allí aparte.',
+            run: body => api(`/admin/courses/${cid}/delete`, { method: 'POST', body })
+          });
+          if (!done) return;
+          $('#course-edit').innerHTML = '';
+          loadCourses(); loadGroups();
+        } catch (err) { alert(err.message); }
+      }));
     } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
   }
 

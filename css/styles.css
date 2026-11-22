@@ -676,3 +676,22 @@ h1, h2, h3, h4 {
 .pay-btn { margin-top: .4rem; }
 .pay-link { color: var(--blue-light); font-size: .78rem; padding: 0; margin-top: .3rem; }
 .pay-link:hover { color: var(--warning); }
+
+/* Ventana de advertencia (eliminar grupo/curso) */
+.modal-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 1rem; background: rgba(3, 8, 20, .75); backdrop-filter: blur(3px); }
+.modal { width: 100%; max-width: 520px; max-height: calc(100vh - 2rem); overflow-y: auto; padding: 1.75rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 24px 60px -12px rgba(0, 0, 0, .6); }
+.danger-modal { border-color: rgba(255, 107, 107, .5); }
+.danger-head { display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+.danger-head i { font-size: 1.5rem; color: var(--danger); }
+.danger-head h3 { font-size: 1.15rem; }
+.danger-modal p { margin-bottom: .75rem; color: var(--text-dim); }
+.danger-modal .alert { margin-bottom: .75rem; }
+.impact-list { margin: .35rem 0 0 1.1rem; list-style: disc; display: flex; flex-direction: column; gap: .25rem; font-size: .9rem; }
+.danger-form { display: flex; flex-direction: column; gap: .9rem; margin-top: 1rem; }
+.danger-actions { display: flex; justify-content: flex-end; gap: .5rem; flex-wrap: wrap; }
+.btn-danger { background: var(--danger); color: #fff; border: 1px solid var(--danger); }
+.btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-danger:disabled { opacity: .45; cursor: not-allowed; }
+.btn-danger-ghost { color: var(--danger); }
+.btn-danger-ghost:hover { border-color: var(--danger); }
+.nowrap { white-space: nowrap; }

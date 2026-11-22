@@ -668,3 +668,8 @@ h1, h2, h3, h4 {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+/* Roles en la tabla de usuarios */
+.role-chips { display: inline-flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.role-chips .badge .link-btn { font-size: .75rem; }
+.input-sm.role-add, .input-sm.role-select { min-width: 0; padding: .3rem .6rem; font-size: .8rem; }

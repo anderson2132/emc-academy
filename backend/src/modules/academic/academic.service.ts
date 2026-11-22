@@ -348,6 +348,65 @@ export class AcademicService {
     await tx.preEnrollment.updateMany({ where: { groupId: { in: groupIds }, status: { in: ['PENDING', 'CLAIMED'] } }, data: { status: 'CANCELLED' } });
   }
 
+  // ───────────── Resumen (admin) ─────────────
+
+  /** Cifras para la portada de la consola y contadores del menú. */
+  async adminSummary() {
+    const now = new Date();
+    const liveGroup = { deletedAt: null, status: { notIn: ['CANCELLED' as const] } };
+    const [pendingAccounts, pendingLinks, claimedPre, pendingPre, openGroups, inProgressGroups, enrollments, legacyRequests] = await Promise.all([
+      this.prisma.accountRequest.count({ where: { status: 'PENDING' } }),
+      this.prisma.studentGuardian.count({ where: { status: 'PENDING_ADMIN' } }),
+      this.prisma.preEnrollment.count({ where: { status: 'CLAIMED', group: { deletedAt: null } } }),
+      this.prisma.preEnrollment.count({ where: { status: 'PENDING', group: { deletedAt: null } } }),
+      this.prisma.academicGroup.count({ where: { deletedAt: null, status: 'ENROLLING' } }),
+      this.prisma.academicGroup.count({ where: { deletedAt: null, status: 'IN_PROGRESS' } }),
+      this.prisma.enrollment.findMany({
+        where: { status: 'APPROVED', group: liveGroup },
+        select: {
+          id: true, priceCents: true, discountCents: true,
+          payments: { where: { voidedAt: null }, select: { amountCents: true } },
+          student: { select: { user: { select: { fullName: true } } } },
+          group: { select: { id: true, code: true, startDate: true, endDate: true, course: { select: { name: true } } } },
+        },
+      }),
+      this.prisma.enrollment.count({ where: { status: { in: ['REQUESTED', 'PENDING_GUARDIAN'] }, group: { deletedAt: null } } }),
+    ]);
+
+    const current = enrollments.filter((e) => contentDeadline(e.group.endDate) >= now);
+    const unpaid = current
+      .map((e) => {
+        const paidCents = e.payments.reduce((s, p) => s + p.amountCents, 0);
+        const due = paymentDeadline(e.group.startDate);
+        return {
+          enrollmentId: e.id,
+          student: e.student.user.fullName,
+          course: e.group.course.name,
+          group: { id: e.group.id, code: e.group.code },
+          amountCents: Math.max(0, e.priceCents - e.discountCents - paidCents),
+          dueDate: due.toISOString(),
+          overdue: now > due,
+          paid: isPaid({ priceCents: e.priceCents, discountCents: e.discountCents, paidCents }),
+        };
+      })
+      .filter((x) => !x.paid)
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+
+    return {
+      pendingAccounts,
+      pendingLinks,
+      claimedPreEnrollments: claimedPre,
+      pendingPreEnrollments: pendingPre,
+      legacyRequests,
+      openGroups,
+      inProgressGroups,
+      activeEnrollments: current.length,
+      unpaidCount: unpaid.length,
+      overdueCount: unpaid.filter((u) => u.overdue).length,
+      unpaid: unpaid.slice(0, 50).map(({ paid: _p, ...rest }) => rest),
+    };
+  }
+
   // ───────────── Cursos y temario (admin) ─────────────
 
   async courseDetail(courseId: string) {

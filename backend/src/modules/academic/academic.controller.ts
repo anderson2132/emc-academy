@@ -18,6 +18,11 @@ export class AdminAcademicController {
     return this.academic.listCourses();
   }
 
+  @Get('summary')
+  summary() {
+    return this.academic.adminSummary();
+  }
+
   @Get('courses/:id')
   course(@Param('id', ParseUUIDPipe) id: string) {
     return this.academic.courseDetail(id);

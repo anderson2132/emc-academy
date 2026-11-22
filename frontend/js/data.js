@@ -192,11 +192,11 @@ const FAQ = [
   },
   {
     q: '¿Cómo me inscribo?',
-    a: 'Crea tu cuenta en el Campus Virtual (con Google, Microsoft o tu correo), elige tu curso y envía tu solicitud. Nuestro equipo la revisa y te confirma la matrícula.'
+    a: 'Escríbenos por WhatsApp indicando el curso que te interesa. Nuestro equipo te matricula y te ayuda a crear tu cuenta en el Campus Virtual (con Google, Microsoft o tu correo), donde verás tus clases y grabaciones.'
   },
   {
     q: '¿Cómo y cuándo pago?',
-    a: 'Una vez aprobada tu matrícula, envía tu comprobante (Yape, Plin o transferencia) por WhatsApp. Tienes hasta 7 días desde el inicio del curso para completar el pago.'
+    a: 'Una vez confirmada tu matrícula, envía tu comprobante (Yape, Plin o transferencia) por WhatsApp. Tienes hasta 7 días desde el inicio del curso para completar el pago.'
   },
   {
     q: '¿Y si no puedo asistir a una clase?',
@@ -204,6 +204,6 @@ const FAQ = [
   },
   {
     q: '¿Cómo inscribo a mi hijo o hija en Kids & Teens?',
-    a: 'Como apoderado, crea tu cuenta y registra a tu hijo o hija. También pueden registrarse ellos mismos con tu autorización. Podrás ver sus horarios, asistencia y avances desde tu cuenta.'
+    a: 'Escríbenos por WhatsApp y nuestro equipo lo matricula. Como apoderado, crea tu cuenta en el Campus Virtual y registra a tu hijo o hija (o autoriza su cuenta); desde ahí verás sus horarios, pagos y avances.'
   }
 ];

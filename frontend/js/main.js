@@ -12,8 +12,9 @@
 
   const price = () => `${F.currency} ${F.price}`;
   const findCourse = slug => COURSES.find(c => c.slug === slug);
-  const enrollHref = c => `${R}campus/login.html?inscribir=${encodeURIComponent(c.slug)}`;
   const waHref = text => `https://wa.me/${CONFIG.whatsapp}?text=${encodeURIComponent(text)}`;
+  // La matrícula la hace el equipo (admin): el botón "Inscribirme" abre WhatsApp con el curso ya indicado.
+  const enrollHref = c => waHref(`Hola, quiero inscribirme en el curso ${c.name}${c.line === 'kids' ? ' para mi hijo/a' : ''}.`);
   const startLabel = slug => {
     const u = UPCOMING.find(x => x.slug === slug);
     return u && u.date ? u.date : 'Por anunciar';
@@ -44,7 +45,7 @@
           </div>
           <div class="course-actions">
             <a href="${R}programa.html?c=${c.slug}" class="btn btn-ghost btn-sm">Ver programa</a>
-            <a href="${enrollHref(c)}" class="btn btn-primary btn-sm">Inscribirme</a>
+            <a href="${enrollHref(c)}" class="btn btn-primary btn-sm" target="_blank" rel="noopener"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> Inscribirme</a>
           </div>
         </div>
       </article>`;
@@ -217,11 +218,11 @@
                   <li><i class="fa-solid fa-video" aria-hidden="true"></i><span>Modalidad</span><strong>${F.modality}</strong></li>
                   <li><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i><span>Grabaciones</span><strong>${F.recordingsMonths} meses</strong></li>
                 </ul>
-                <a href="${enrollHref(c)}" class="btn btn-primary btn-block">Inscribirme</a>
-                <a href="${waHref(`Hola, quiero información sobre el curso ${c.name}.`)}" class="btn btn-ghost btn-block" target="_blank" rel="noopener">
-                  <i class="fa-brands fa-whatsapp" aria-hidden="true"></i> Consultar por WhatsApp
+                <a href="${enrollHref(c)}" class="btn btn-primary btn-block" target="_blank" rel="noopener">
+                  <i class="fa-brands fa-whatsapp" aria-hidden="true"></i> Inscribirme por WhatsApp
                 </a>
-                <p class="enroll-small">Para inscribirte necesitas una cuenta en el Campus Virtual.${c.line === 'kids' ? ' Los menores se inscriben con autorización de su apoderado.' : ''}</p>
+                <a href="${R}campus/login.html" class="btn btn-ghost btn-block">Crear mi cuenta del Campus</a>
+                <p class="enroll-small">Escríbenos y nuestro equipo te matricula. Tus clases, grabaciones y materiales estarán en tu cuenta del Campus Virtual.${c.line === 'kids' ? ' Los menores usan una cuenta vinculada a su apoderado.' : ''}</p>
               </div>
             </aside>
           </div>

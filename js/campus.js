@@ -18,6 +18,34 @@
     REJECTED: ['Rechazada', 'danger']
   };
   const fmtDate = iso => new Date(iso).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
+  const INTENT_KEY = 'emc.inscribir';
+  const pill = ([label, type]) => `<span class="status-pill st-${type}">${label}</span>`;
+  const ENROLL_STATUS = {
+    PENDING_GUARDIAN: ['Espera autorización del apoderado', 'warning'],
+    REQUESTED: ['En revisión', 'warning'],
+    APPROVED: ['Aprobada', 'success'],
+    REJECTED: ['Rechazada', 'danger'],
+    CANCELLED: ['Anulada', 'muted']
+  };
+  const LINK_STATUS = {
+    PENDING_GUARDIAN: ['Espera autorización del apoderado', 'warning'],
+    PENDING_ADMIN: ['En revisión por administración', 'warning'],
+    APPROVED: ['Vinculado', 'success'],
+    REVOKED: ['Anulado', 'danger']
+  };
+  const GROUP_STATUS = {
+    PLANNED: ['Planificado', 'info'],
+    ENROLLING: ['Inscripciones abiertas', 'success'],
+    IN_PROGRESS: ['En curso', 'info'],
+    FINISHED: ['Terminado', 'muted'],
+    CANCELLED: ['Cancelado', 'danger']
+  };
+  const COURSE_STATUS = { DRAFT: ['Borrador', 'warning'], PUBLISHED: ['Publicado', 'success'], ARCHIVED: ['Archivado', 'muted'] };
+  const PRE_STATUS = { PENDING: ['Esperando cuenta', 'info'], CLAIMED: ['Reclamada: verificar', 'warning'], LINKED: ['Vinculada', 'success'], CANCELLED: ['Anulada', 'muted'] };
+  const CONSENT_TEXT = 'Declaro ser padre, madre o tutor legal del menor y autorizo a EMC Academy a registrarlo y a tratar sus datos personales con fines académicos. <span class="muted">(Texto provisional.)</span>';
+  /** Convierte "450" o "450.50" a céntimos; vacío → undefined. */
+  const toCents = v => { const n = Number(String(v || '').replace(',', '.')); return v && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : undefined; };
+  const isMinorDate = iso => { if (!iso) return false; const d = new Date(`${iso}T00:00:00`); d.setFullYear(d.getFullYear() + 18); return new Date() < d; };
 
   const PROVIDER_LABEL = { google: 'Google', microsoft: 'Microsoft', GOOGLE: 'Google', MICROSOFT: 'Microsoft' };
   /** Mensajes para los códigos que devuelve el ingreso con Google/Microsoft. */
@@ -57,6 +85,8 @@
 
     const course = typeof COURSES !== 'undefined' && COURSES.find(c => c.slug === params.get('inscribir'));
     if (course) {
+      // Se recuerda el curso elegido para preseleccionarlo en el panel tras ingresar (también vía Google/Microsoft).
+      try { sessionStorage.setItem(INTENT_KEY, course.slug); } catch { /* sin almacenamiento */ }
       const box = $('#enroll-context');
       box.hidden = false;
       box.innerHTML = `<i class="fa-solid fa-circle-info" aria-hidden="true"></i><p>Para inscribirte en <strong>${esc(course.name)}</strong>, ingresa o crea tu cuenta.</p>`;
@@ -221,10 +251,12 @@
     }
 
     const blocks = [];
-    if (me.roles.includes('ADMIN')) blocks.push(adminBlock(), groupsBlock());
+    if (me.roles.includes('ADMIN')) {
+      blocks.push(adminRequestsBlock(), enrollmentRequestsBlock(), guardianLinksBlock(), preEnrollmentsBlock(), groupsBlock(), coursesBlock(), usersBlock());
+    }
     if (me.roles.includes('TEACHER')) blocks.push(teacherBlock());
-    if (me.roles.includes('STUDENT')) blocks.push(studentBlock());
-    if (me.roles.includes('GUARDIAN')) blocks.push(placeholderBlock('fa-people-roof', 'Mis hijos', 'Aquí verás los cursos, asistencia y avances de tus hijos vinculados.'));
+    if (me.roles.includes('STUDENT')) blocks.push(claimBlock(), studentBlock(), enrollBlock(false), myGuardiansBlock());
+    if (me.roles.includes('GUARDIAN')) blocks.push(childrenBlock(), enrollBlock(true), createChildBlock());
     body.insertAdjacentHTML('afterbegin', blocks.map(b => b.html).join(''));
     blocks.forEach(b => b.init && b.init());
   }
@@ -269,7 +301,8 @@
                 ${!c.payment.paid ? `<li><i class="fa-solid fa-tag" aria-hidden="true"></i> ${soles(c.payment.amountCents - c.payment.paidCents)} por pagar</li>` : ''}
               </ul>
               ${blocked && ACCESS_MSG[blocked] ? `<div class="alert alert-${blocked === 'GROUP_FINISHED' ? 'info' : 'warning'}"><i class="fa-solid fa-circle-info"></i><p>${ACCESS_MSG[blocked]}</p></div>` : ''}
-              ${c.zoomUrl ? `<a class="btn btn-primary btn-sm" href="${esc(c.zoomUrl)}" target="_blank" rel="noopener"><i class="fa-solid fa-video" aria-hidden="true"></i> Entrar a la clase (Zoom)</a>` : ''}
+              ${temario(c.course.modules)}
+              ${c.zoomUrl ?`<a class="btn btn-primary btn-sm" href="${esc(c.zoomUrl)}" target="_blank" rel="noopener"><i class="fa-solid fa-video" aria-hidden="true"></i> Entrar a la clase (Zoom)</a>` : ''}
             </article>`;
           }).join('')}</div>`;
         } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
@@ -359,17 +392,19 @@
 
   async function loadGroups() {
     const box = $('#groups-box');
+    if (!box) return;
     try {
       const list = await api('/admin/groups');
       if (!list.length) { box.innerHTML = '<p class="muted">Aún no hay grupos. Crea uno con <strong>Nuevo grupo</strong> para asignar docentes y alumnos.</p>'; return; }
       box.innerHTML = `<div class="table-wrap"><table class="table">
-        <thead><tr><th>Curso</th><th>Grupo</th><th>Fechas</th><th>Docentes</th><th>Alumnos</th><th></th></tr></thead>
+        <thead><tr><th>Curso</th><th>Grupo</th><th>Fechas</th><th>Estado</th><th>Docentes</th><th>Alumnos</th><th></th></tr></thead>
         <tbody>${list.map(g => `<tr>
           <td><strong>${esc(g.course.name)}</strong>${g.schedule ? `<br><span class="muted">${esc(g.schedule)}</span>` : ''}</td>
           <td class="muted">${esc(g.code)}</td>
           <td class="muted">${fmtDay(g.startDate)} – ${fmtDay(g.endDate)}</td>
+          <td>${pill(GROUP_STATUS[g.status] || [g.status, 'info'])}</td>
           <td>${g.teachers.length ? g.teachers.map(t => esc(t.fullName)).join(', ') : '<span class="muted">Sin docente</span>'}</td>
-          <td>${g.students} / ${g.capacity}</td>
+          <td>${g.students} / ${g.capacity}${g.pendingRequests ? `<br><span class="status-pill st-warning">${g.pendingRequests} por revisar</span>` : ''}</td>
           <td class="actions"><button class="btn btn-ghost btn-xs" data-open-group="${g.id}">Gestionar</button></td>
         </tr>`).join('')}</tbody></table></div>`;
       box.querySelectorAll('[data-open-group]').forEach(b => b.addEventListener('click', () => openGroup(b.dataset.openGroup)));
@@ -397,7 +432,23 @@
             <h3>${esc(g.course.name)} · <span class="muted">${esc(g.code)}</span></h3>
             <button class="btn btn-ghost btn-xs" id="close-group">Cerrar</button>
           </div>
-          <p class="muted">${fmtDay(g.startDate)} – ${fmtDay(g.endDate)}${g.schedule ? ' · ' + esc(g.schedule) : ''} · Pago hasta ${new Date(g.paymentDueDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}${g.zoomUrl ? ` · <a href="${esc(g.zoomUrl)}" target="_blank" rel="noopener">Zoom</a>` : ''}</p>
+          <p class="muted">${pill(GROUP_STATUS[g.status] || [g.status, 'info'])} ${fmtDay(g.startDate)} – ${fmtDay(g.endDate)}${g.schedule ? ' · ' + esc(g.schedule) : ''} · Pago hasta ${new Date(g.paymentDueDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}${g.zoomUrl ? ` · <a href="${esc(g.zoomUrl)}" target="_blank" rel="noopener">Zoom</a>` : ''}</p>
+          ${g.pendingRequests ? `<p class="small"><span class="status-pill st-warning">${g.pendingRequests} solicitud${g.pendingRequests === 1 ? '' : 'es'} de matrícula por revisar</span> (ver "Solicitudes de matrícula")</p>` : ''}
+
+          <details class="edit-box">
+            <summary><i class="fa-solid fa-pen" aria-hidden="true"></i> Editar grupo</summary>
+            <form id="ge-form" class="form-grid" novalidate>
+              <div class="field"><label for="ge-start">Inicio</label><input id="ge-start" name="startDate" type="date" value="${g.startDate}" required></div>
+              <div class="field"><label for="ge-end">Fin</label><input id="ge-end" name="endDate" type="date" value="${g.endDate}" required></div>
+              <div class="field"><label for="ge-cap">Cupo</label><input id="ge-cap" name="capacity" type="number" min="1" max="200" value="${g.capacity}" required></div>
+              <div class="field"><label for="ge-status">Estado</label><select id="ge-status" name="status">${Object.entries(GROUP_STATUS).map(([v, [l]]) => `<option value="${v}" ${v === g.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+              <div class="field full"><label for="ge-sched">Horario</label><input id="ge-sched" name="schedule" maxlength="200" value="${esc(g.schedule || '')}"></div>
+              <div class="field full"><label for="ge-zoom">Enlace de Zoom</label><input id="ge-zoom" name="zoomUrl" type="url" value="${esc(g.zoomUrl || '')}" placeholder="https://zoom.us/j/..."></div>
+              <p class="full muted small">Solo reciben solicitudes los grupos con <strong>Inscripciones abiertas</strong>. Al pasar a Cancelado o Terminado se cierran las solicitudes y prematrículas en curso.</p>
+              <div class="full"><button class="btn btn-primary btn-sm" type="submit">Guardar cambios</button>
+                <button class="btn btn-ghost btn-sm" type="button" id="ge-delete"><i class="fa-solid fa-trash" aria-hidden="true"></i> Eliminar grupo</button></div>
+            </form>
+          </details>
 
           <h4><i class="fa-solid fa-chalkboard-user"></i> Docentes</h4>
           <ul class="chip-list">${g.teachers.map(t => `<li>${esc(t.fullName)} <button class="link-btn" data-rm-teacher="${t.id}" aria-label="Quitar ${esc(t.fullName)}">✕</button></li>`).join('') || '<li class="muted">Sin docentes asignados</li>'}</ul>
@@ -409,7 +460,7 @@
           <h4><i class="fa-solid fa-user-graduate"></i> Alumnos matriculados (${g.students.length}/${g.capacity})</h4>
           ${g.students.length ? `<div class="table-wrap"><table class="table">
             <thead><tr><th>Nombre</th><th>Correo</th><th>Pago</th><th></th></tr></thead>
-            <tbody>${g.students.map(s => `<tr><td>${esc(s.fullName)}</td><td class="muted">${esc(s.email || '')}</td>
+            <tbody>${g.students.map(s => `<tr><td>${esc(s.fullName)}</td><td class="muted">${esc(s.email || s.username || '')}</td>
               <td>${s.paid ? '<span class="status-pill st-success">Pagado</span>' : `<span class="status-pill st-warning">Pendiente · ${soles(s.priceCents - s.paidCents)}</span>`}</td>
               <td class="actions"><button class="btn btn-ghost btn-xs" data-rm-student="${s.id}">Quitar</button></td></tr>`).join('')}</tbody></table></div>`
             : '<p class="muted">Aún no hay alumnos matriculados.</p>'}
@@ -418,11 +469,36 @@
             <button class="btn btn-primary btn-xs" id="s-add" ${sOptions.length ? '' : 'disabled'}>Matricular alumno</button>
           </div>
           <p class="muted small">Solo aparecen usuarios <strong>activos</strong> con el rol correspondiente. Aprueba primero su solicitud de cuenta.</p>
+
+          <h4><i class="fa-solid fa-user-clock"></i> Prematrículas de este grupo (${g.preEnrollments.length})</h4>
+          ${g.preEnrollments.length ? `<ul class="chip-list">${g.preEnrollments.map(p => `<li>${esc(p.fullName)} <span class="muted">${esc(p.email)}</span> ${pill(PRE_STATUS[p.status])}</li>`).join('')}</ul>` : '<p class="muted">Sin prematrículas. Regístralas en el bloque "Prematrículas".</p>'}
           <div class="alert" id="gd-msg" hidden></div>
         </div>`;
 
       const act = async (fn) => { try { await fn(); await loadGroups(); await openGroup(id); } catch (err) { showMsg($('#gd-msg'), 'danger', esc(err.message)); } };
       $('#close-group').addEventListener('click', () => { box.innerHTML = ''; });
+      $('#ge-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const f = e.target;
+        if (!f.reportValidity()) return;
+        if (f.status.value !== g.status && ['CANCELLED', 'FINISHED'].includes(f.status.value) &&
+          !confirm('Al cancelar o terminar el grupo se rechazan las solicitudes y prematrículas en curso. ¿Continuar?')) return;
+        act(() => api(`/admin/groups/${id}`, {
+          method: 'PATCH',
+          body: {
+            startDate: f.startDate.value, endDate: f.endDate.value, capacity: Number(f.capacity.value),
+            status: f.status.value, schedule: f.schedule.value.trim(), zoomUrl: f.zoomUrl.value.trim()
+          }
+        }));
+      });
+      $('#ge-delete').addEventListener('click', async () => {
+        if (!confirm('¿Eliminar este grupo? Solo se puede si no tiene alumnos, solicitudes ni prematrículas.')) return;
+        try {
+          await api(`/admin/groups/${id}`, { method: 'DELETE' });
+          box.innerHTML = '';
+          loadGroups();
+        } catch (err) { showMsg($('#gd-msg'), 'danger', esc(err.message)); }
+      });
       $('#t-add').addEventListener('click', () => act(() => api(`/admin/groups/${id}/teachers`, { method: 'POST', body: { userId: $('#t-select').value } })));
       $('#s-add').addEventListener('click', () => act(() => api(`/admin/groups/${id}/students`, { method: 'POST', body: { userId: $('#s-select').value } })));
       box.querySelectorAll('[data-rm-teacher]').forEach(b => b.addEventListener('click', () => act(() => api(`/admin/groups/${id}/teachers/${b.dataset.rmTeacher}`, { method: 'DELETE' }))));
@@ -431,6 +507,588 @@
       }));
       box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  /* ----- Temario de un curso ----- */
+  function temario(modules) {
+    if (!modules || !modules.length) return '';
+    return `<details class="students-list"><summary>Ver temario (${modules.length} módulos)</summary>
+      <ol class="temario">${modules.map(m => `<li>${esc(m.title)}</li>`).join('')}</ol></details>`;
+  }
+
+  /* ----- Inscripción: alumno (para sí) o apoderado (para un hijo) ----- */
+  function enrollBlock(forGuardian) {
+    const p = forGuardian ? 'gen' : 'sen';
+    return {
+      html: `
+        <section class="panel-card" id="${p}-card">
+          <h2><i class="fa-solid fa-pen-to-square" aria-hidden="true"></i> ${forGuardian ? 'Inscribir a mi hijo/a' : 'Inscribirme a un curso'}</h2>
+          <form id="${p}-form" class="form-grid" novalidate>
+            ${forGuardian ? `<div class="field full"><label for="${p}-child">Hijo/a</label><select id="${p}-child" name="studentId" required><option value="">Cargando…</option></select></div>` : ''}
+            <div class="field"><label for="${p}-course">Curso</label><select id="${p}-course" name="course" required><option value="">Cargando…</option></select></div>
+            <div class="field"><label for="${p}-group">Grupo</label><select id="${p}-group" name="groupId" required disabled><option value="">Primero elige un curso</option></select></div>
+            <p class="full muted small" id="${p}-hint">${forGuardian
+              ? 'Tu solicitud ya cuenta como autorización. Luego la revisa el administrador y te avisamos por correo.'
+              : 'El administrador revisa tu solicitud. Si eres menor de edad, primero la autoriza tu apoderado.'}</p>
+            <div class="full"><button class="btn btn-primary" type="submit">Enviar solicitud</button></div>
+            <div class="alert full" id="${p}-msg" hidden></div>
+          </form>
+          <h3 class="sub-title">Solicitudes enviadas</h3>
+          <div id="${p}-list"><p class="muted">Cargando…</p></div>
+        </section>`,
+      async init() {
+        const f = $(`#${p}-form`);
+        const msg = $(`#${p}-msg`);
+        const groupSel = f.groupId;
+
+        if (forGuardian) {
+          const kids = (await api('/me/children').catch(() => [])).filter(k => k.linkStatus === 'APPROVED' && k.student.status === 'ACTIVE');
+          f.studentId.innerHTML = kids.length
+            ? kids.map(k => `<option value="${k.student.id}">${esc(k.student.fullName)}</option>`).join('')
+            : '<option value="">Aún no tienes hijos con vínculo aprobado</option>';
+          if (!kids.length) setBusy(f, true);
+        }
+
+        const courses = await api('/courses').catch(() => []);
+        f.course.innerHTML = '<option value="">Elige un curso…</option>' +
+          courses.map(c => `<option value="${esc(c.slug)}">${esc(c.name)}${c.level ? ` (nivel ${c.level})` : ''} — ${soles(c.priceCents)}</option>`).join('');
+
+        const loadGroupsFor = async slug => {
+          groupSel.disabled = true;
+          if (!slug) { groupSel.innerHTML = '<option value="">Primero elige un curso</option>'; return; }
+          groupSel.innerHTML = '<option value="">Cargando…</option>';
+          const groups = await api(`/courses/${encodeURIComponent(slug)}/groups`).catch(() => []);
+          groupSel.innerHTML = groups.length
+            ? groups.map(g => `<option value="${g.id}" ${g.seatsLeft ? '' : 'disabled'}>Inicia ${fmtDay(g.startDate)}${g.schedule ? ' · ' + esc(g.schedule) : ''} · ${g.seatsLeft ? `${g.seatsLeft} cupos` : 'sin cupos'}</option>`).join('')
+            : '<option value="">No hay grupos con inscripciones abiertas</option>';
+          groupSel.disabled = !groups.length;
+        };
+        f.course.addEventListener('change', () => loadGroupsFor(f.course.value));
+
+        // Curso elegido en el portal antes de ingresar.
+        let intent = null;
+        try { intent = sessionStorage.getItem(INTENT_KEY); sessionStorage.removeItem(INTENT_KEY); } catch { /* sin almacenamiento */ }
+        if (intent && courses.some(c => c.slug === intent)) {
+          f.course.value = intent;
+          await loadGroupsFor(intent);
+          $(`#${p}-card`).scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        f.addEventListener('submit', async e => {
+          e.preventDefault();
+          if (!f.reportValidity()) return;
+          const body = { groupId: groupSel.value };
+          if (forGuardian) body.studentId = f.studentId.value;
+          setBusy(f, true);
+          try {
+            const r = await api('/enrollments', { method: 'POST', body });
+            showMsg(msg, 'success', r.status === 'PENDING_GUARDIAN'
+              ? 'Solicitud enviada. Ahora tu apoderado debe autorizarla desde su panel.'
+              : 'Solicitud enviada. El administrador la revisará y te avisaremos por correo.');
+            loadMyRequests(p);
+            if (forGuardian) loadChildren();
+          } catch (err) { showMsg(msg, 'danger', esc(err.message)); }
+          finally { setBusy(f, false); }
+        });
+        loadMyRequests(p);
+      }
+    };
+  }
+
+  async function loadMyRequests(p) {
+    const box = $(`#${p}-list`);
+    if (!box) return;
+    try {
+      const list = await api('/enrollments/mine');
+      if (!list.length) { box.innerHTML = '<p class="muted">No tienes solicitudes en curso.</p>'; return; }
+      box.innerHTML = `<div class="table-wrap"><table class="table">
+        <thead><tr><th>Curso</th><th>Alumno</th><th>Inicio</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${list.map(r => `<tr>
+          <td><strong>${esc(r.course)}</strong><br><span class="muted">${esc(r.group.code)}</span></td>
+          <td>${r.forMe ? 'Yo' : esc(r.student.fullName)}</td>
+          <td class="muted">${fmtDay(r.group.startDate)}</td>
+          <td>${pill(ENROLL_STATUS[r.status] || [r.status, 'info'])}${r.reviewNotes ? `<br><span class="muted small">${esc(r.reviewNotes)}</span>` : ''}</td>
+          <td class="actions">${['REQUESTED', 'PENDING_GUARDIAN'].includes(r.status) ? `<button class="btn btn-ghost btn-xs" data-cancel-enr="${r.id}">Anular</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+      box.querySelectorAll('[data-cancel-enr]').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('¿Anular esta solicitud?')) return;
+        try { await api(`/enrollments/${b.dataset.cancelEnr}/cancel`, { method: 'POST' }); loadMyRequests(p); }
+        catch (err) { alert(err.message); }
+      }));
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  /* ----- Alumno: prematrículas por confirmar ----- */
+  function claimBlock() {
+    return {
+      html: '<div id="claim-holder"></div>',
+      init() { renderClaims($('#claim-holder')); }
+    };
+  }
+
+  async function renderClaims(holder) {
+    if (!holder) return;
+    const list = await api('/me/pre-enrollments').catch(() => []);
+    if (!list.length) { holder.innerHTML = ''; return; }
+    holder.innerHTML = `<section class="panel-card highlight-card">
+      <h2><i class="fa-solid fa-envelope-open-text" aria-hidden="true"></i> Tienes una matrícula registrada por EMC Academy</h2>
+      <div class="course-list">${list.map(p => `<article class="my-course">
+        <div class="my-course-head"><div><h3>${esc(p.course)}</h3><p class="muted">Grupo ${esc(p.group.code)} · a nombre de ${esc(p.fullName)}</p></div>
+          ${p.status === 'CLAIMED' ? pill(['Confirmada: en verificación', 'warning']) : ''}</div>
+        <ul class="my-course-meta"><li><i class="fa-regular fa-calendar"></i> Inicia ${fmtDay(p.group.startDate)}</li>
+          ${p.group.schedule ? `<li><i class="fa-regular fa-clock"></i> ${esc(p.group.schedule)}</li>` : ''}</ul>
+        ${p.status === 'PENDING' ? `<button class="btn btn-primary btn-sm" data-claim="${p.id}"><i class="fa-solid fa-check"></i> Sí, es mi matrícula</button>`
+          : '<p class="muted small">El administrador verificará tus datos y la matrícula aparecerá en "Mis cursos".</p>'}
+      </article>`).join('')}</div></section>`;
+    holder.querySelectorAll('[data-claim]').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('¿Confirmas que esta matrícula es tuya? El administrador verificará tus datos.')) return;
+      try { await api(`/me/pre-enrollments/${b.dataset.claim}/claim`, { method: 'POST' }); location.reload(); }
+      catch (err) { alert(err.message); }
+    }));
+  }
+
+  /* ----- Alumno: mis apoderados ----- */
+  function myGuardiansBlock() {
+    return {
+      html: '<section class="panel-card" id="my-guardians"></section>',
+      init() { renderMyGuardians($('#my-guardians')); }
+    };
+  }
+
+  async function renderMyGuardians(holder) {
+    if (!holder) return;
+    const list = await api('/me/guardians').catch(() => []);
+    holder.innerHTML = `
+      <h2><i class="fa-solid fa-people-roof" aria-hidden="true"></i> Mi apoderado</h2>
+      ${list.length ? `<ul class="method-list">${list.map(l => `<li class="method-row"><span><strong>${esc(l.guardian.fullName)}</strong>
+        <span class="muted">${esc(l.guardian.email || '')}</span></span>${pill(LINK_STATUS[l.status])}</li>`).join('')}</ul>`
+        : '<p class="muted">Si eres <strong>menor de edad</strong>, necesitas un apoderado vinculado para inscribirte.</p>'}
+      <form class="assign-row" id="add-guardian-form" novalidate>
+        <input type="email" name="email" class="input-sm" placeholder="Correo de tu apoderado" required aria-label="Correo de tu apoderado">
+        <button class="btn btn-primary btn-xs" type="submit">Agregar apoderado</button>
+      </form>
+      <p class="muted small">Tu apoderado debe tener una cuenta de <strong>Apoderado</strong> en el campus. Le pediremos que autorice el vínculo.</p>
+      <div class="alert" id="add-guardian-msg" hidden></div>`;
+    const f = $('#add-guardian-form');
+    f.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!f.reportValidity()) return;
+      setBusy(f, true);
+      try {
+        await api('/me/guardians', { method: 'POST', body: { email: f.email.value.trim() } });
+        renderMyGuardians(holder);
+      } catch (err) { showMsg($('#add-guardian-msg'), 'danger', esc(err.message)); setBusy(f, false); }
+    });
+  }
+
+  /* ----- Apoderado: mis hijos ----- */
+  function childrenBlock() {
+    return {
+      html: `<section class="panel-card"><div class="panel-card-head">
+          <h2><i class="fa-solid fa-people-roof" aria-hidden="true"></i> Mis hijos</h2>
+          <a class="btn btn-ghost btn-sm" href="#create-child-card"><i class="fa-solid fa-user-plus"></i> Registrar a mi hijo/a</a></div>
+        <div id="children-box"><p class="muted">Cargando…</p></div></section>`,
+      init: loadChildren
+    };
+  }
+
+  async function loadChildren() {
+    const box = $('#children-box');
+    if (!box) return;
+    try {
+      const kids = await api('/me/children');
+      if (!kids.length) {
+        box.innerHTML = '<div class="empty-state"><p>Aún no tienes hijos vinculados. Regístralo con el formulario de abajo, o pídele que te agregue como apoderado desde su cuenta.</p></div>';
+        return;
+      }
+      box.innerHTML = `<div class="course-list">${kids.map(k => `
+        <article class="my-course">
+          <div class="my-course-head">
+            <div><h3>${esc(k.student.fullName)}</h3><p class="muted">${esc(k.student.email || 'Usuario: ' + (k.student.username || ''))}${k.relationship ? ' · ' + esc(k.relationship) : ''}</p></div>
+            ${pill(k.linkStatus === 'PENDING_GUARDIAN' ? ['Espera tu autorización', 'warning'] : LINK_STATUS[k.linkStatus])}
+          </div>
+          ${k.linkStatus === 'PENDING_GUARDIAN' ? `
+            <form class="authorize-form" data-student="${k.student.id}">
+              <p class="muted small">${esc(k.student.fullName)} te indicó como su apoderado.</p>
+              <div class="field"><label>Parentesco</label><input name="relationship" maxlength="40" placeholder="Madre, padre, tutor…"></div>
+              <label class="field-check"><input type="checkbox" name="consent" required> <span>${CONSENT_TEXT}</span></label>
+              <div><button class="btn btn-primary btn-xs" type="submit">Autorizar</button> <button class="btn btn-ghost btn-xs" type="button" data-decline="${k.student.id}">No soy su apoderado</button></div>
+            </form>` : ''}
+          ${k.linkStatus === 'PENDING_ADMIN' ? '<p class="muted small">El administrador está revisando el vínculo. Te avisaremos por correo.</p>' : ''}
+          ${k.requests.filter(r => r.status === 'PENDING_GUARDIAN').map(r => `
+            <div class="alert alert-warning"><i class="fa-solid fa-hand"></i><p>Quiere inscribirse en <strong>${esc(r.course)}</strong> (inicia ${fmtDay(r.group.startDate)}).
+              <button class="btn btn-primary btn-xs" data-enr-ok="${r.id}">Autorizar</button> <button class="btn btn-ghost btn-xs" data-enr-no="${r.id}">No autorizar</button></p></div>`).join('')}
+          ${k.requests.filter(r => r.status === 'REQUESTED').map(r => `<p class="small">${pill(ENROLL_STATUS.REQUESTED)} ${esc(r.course)} · inicia ${fmtDay(r.group.startDate)}</p>`).join('')}
+          ${k.courses.length ? `<ul class="child-courses">${k.courses.map(c => {
+            const pay = c.payment.paid ? pill(['Pagado', 'success'])
+              : (c.access.live === 'PAYMENT_OVERDUE' || c.access.content === 'PAYMENT_OVERDUE') ? pill(['Pago vencido', 'danger'])
+              : pill([`Pago pendiente · hasta ${new Date(c.payment.dueDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short' })}`, 'warning']);
+            return `<li><strong>${esc(c.course.name)}</strong> ${pay}<br>
+              <span class="muted">${fmtDay(c.group.startDate)} – ${fmtDay(c.group.endDate)}${c.group.schedule ? ' · ' + esc(c.group.schedule) : ''}${c.group.teachers.length ? ' · ' + c.group.teachers.map(esc).join(', ') : ''}</span>
+              ${!c.payment.paid ? `<br><span class="muted">${soles(c.payment.amountCents - c.payment.paidCents)} por pagar</span>` : ''}</li>`;
+          }).join('')}</ul>` : k.linkStatus === 'APPROVED' ? '<p class="muted small">Sin cursos matriculados todavía.</p>' : ''}
+        </article>`).join('')}</div>`;
+
+      box.querySelectorAll('.authorize-form').forEach(f => f.addEventListener('submit', async e => {
+        e.preventDefault();
+        if (!f.reportValidity()) return;
+        try {
+          await api(`/me/children/${f.dataset.student}/authorize`, { method: 'POST', body: { consent: true, relationship: f.relationship.value.trim() || undefined } });
+          loadChildren();
+        } catch (err) { alert(err.message); }
+      }));
+      box.querySelectorAll('[data-decline]').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm('¿Rechazar este vínculo?')) return;
+        try { await api(`/me/children/${b.dataset.decline}/decline`, { method: 'POST' }); loadChildren(); } catch (err) { alert(err.message); }
+      }));
+      const decide = (id, ok) => api(`/enrollments/${id}/${ok ? 'guardian-approve' : 'guardian-reject'}`, { method: 'POST' })
+        .then(() => { loadChildren(); loadMyRequests('gen'); }).catch(err => alert(err.message));
+      box.querySelectorAll('[data-enr-ok]').forEach(b => b.addEventListener('click', () => decide(b.dataset.enrOk, true)));
+      box.querySelectorAll('[data-enr-no]').forEach(b => b.addEventListener('click', () => { if (confirm('¿No autorizar esta inscripción?')) decide(b.dataset.enrNo, false); }));
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  function createChildBlock() {
+    return {
+      html: `
+        <section class="panel-card" id="create-child-card">
+          <h2><i class="fa-solid fa-user-plus" aria-hidden="true"></i> Registrar a mi hijo/a</h2>
+          <p class="muted" style="margin-bottom:1rem">Creamos su cuenta del campus. Si no tiene correo, elige un nombre de usuario. El administrador revisará el registro.</p>
+          <form id="child-form" class="form-grid" novalidate>
+            <div class="field"><label for="ch-name">Nombres y apellidos</label><input id="ch-name" name="fullName" minlength="3" maxlength="120" required></div>
+            <div class="field"><label for="ch-birth">Fecha de nacimiento</label><input id="ch-birth" name="birthDate" type="date" required></div>
+            <div class="field"><label for="ch-email">Correo del menor <span class="muted">(opcional)</span></label><input id="ch-email" name="email" type="email"></div>
+            <div class="field"><label for="ch-user">Usuario <span class="muted">(si no tiene correo)</span></label><input id="ch-user" name="username" pattern="[a-zA-Z0-9._\\-]{4,30}" placeholder="ej. sofia.perez"></div>
+            <div class="field"><label for="ch-pass">Contraseña para su cuenta</label><input id="ch-pass" name="password" type="password" minlength="8" autocomplete="new-password" required></div>
+            <div class="field"><label for="ch-rel">Parentesco</label><input id="ch-rel" name="relationship" maxlength="40" placeholder="Madre, padre, tutor…"></div>
+            <label class="field-check full"><input type="checkbox" name="consent" required> <span>${CONSENT_TEXT}</span></label>
+            <div class="full"><button class="btn btn-primary" type="submit">Registrar</button></div>
+            <div class="alert full" id="child-msg" hidden></div>
+          </form>
+        </section>`,
+      init() {
+        const f = $('#child-form');
+        f.addEventListener('submit', async e => {
+          e.preventDefault();
+          if (!f.reportValidity()) return;
+          const email = f.email.value.trim(), username = f.username.value.trim();
+          if (!email && !username) return showMsg($('#child-msg'), 'danger', 'Indica un correo o un nombre de usuario.');
+          setBusy(f, true);
+          try {
+            const r = await api('/me/children', {
+              method: 'POST',
+              body: {
+                fullName: f.fullName.value.trim(), birthDate: f.birthDate.value, password: f.password.value, consent: true,
+                email: email || undefined, username: username || undefined, relationship: f.relationship.value.trim() || undefined
+              }
+            });
+            f.reset();
+            showMsg($('#child-msg'), 'success', `Listo. Cuando el administrador lo apruebe, podrá ingresar con <strong>${esc(r.login)}</strong> y la contraseña que elegiste.`);
+            loadChildren();
+          } catch (err) { showMsg($('#child-msg'), 'danger', esc(err.message)); }
+          finally { setBusy(f, false); }
+        });
+      }
+    };
+  }
+
+  /* ----- Admin: solicitudes de matrícula ----- */
+  function enrollmentRequestsBlock() {
+    return {
+      html: `<section class="panel-card"><div class="panel-card-head">
+          <h2><i class="fa-solid fa-file-signature" aria-hidden="true"></i> Solicitudes de matrícula</h2>
+          <select id="enr-filter" class="input-sm" aria-label="Filtrar solicitudes">
+            <option value="REQUESTED">Por revisar</option>
+            <option value="PENDING_GUARDIAN">Esperando al apoderado</option>
+            <option value="REJECTED">Rechazadas</option>
+          </select></div>
+        <div id="enr-box"><p class="muted">Cargando…</p></div></section>`,
+      init() {
+        $('#enr-filter').addEventListener('change', loadEnrollmentRequests);
+        loadEnrollmentRequests();
+      }
+    };
+  }
+
+  async function loadEnrollmentRequests() {
+    const box = $('#enr-box');
+    if (!box) return;
+    const status = $('#enr-filter').value;
+    try {
+      const list = await api(`/admin/enrollments?status=${status}`);
+      if (!list.length) { box.innerHTML = '<p class="muted">No hay solicitudes en este estado.</p>'; return; }
+      box.innerHTML = `<div class="table-wrap"><table class="table">
+        <thead><tr><th>Alumno</th><th>Curso / grupo</th><th>Cupos</th><th>Fecha</th><th></th></tr></thead>
+        <tbody>${list.map(r => `<tr>
+          <td><strong>${esc(r.student.fullName)}</strong> ${r.student.minor ? '<span class="badge">Menor</span>' : ''}<br>
+            <span class="muted">${esc(r.student.email || r.student.username || '')}${r.student.phone ? ' · ' + esc(r.student.phone) : ''}</span>
+            ${r.guardians.length ? `<br><span class="muted small">Apoderado: ${r.guardians.map(g => esc(g.fullName) + (g.phone ? ' (' + esc(g.phone) + ')' : '')).join(', ')}</span>` : ''}
+            ${r.requestedBy ? `<br><span class="muted small">Pedida por: ${esc(r.requestedBy)}</span>` : ''}
+            ${r.guardianApproved && r.student.minor ? '<br><span class="status-pill st-success">Autorizada por el apoderado</span>' : ''}</td>
+          <td>${esc(r.course)}<br><span class="muted">${esc(r.group.code)} · inicia ${fmtDay(r.group.startDate)}</span></td>
+          <td>${r.group.approved} / ${r.group.capacity}</td>
+          <td class="muted">${fmtDate(r.createdAt)}${r.reviewNotes ? `<br>${esc(r.reviewNotes)}` : ''}</td>
+          <td class="actions">${r.status === 'REQUESTED' ? `<button class="btn btn-primary btn-xs" data-enr-approve="${r.id}" data-price="${r.priceCents}">Aprobar</button>` : ''}
+            ${['REQUESTED', 'PENDING_GUARDIAN'].includes(r.status) ? `<button class="btn btn-ghost btn-xs" data-enr-reject="${r.id}">Rechazar</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+      box.querySelectorAll('[data-enr-approve]').forEach(b => b.addEventListener('click', async () => {
+        const d = prompt(`Precio: ${soles(Number(b.dataset.price))}. Descuento en soles (deja vacío si no hay):`, '');
+        if (d === null) return;
+        const discountCents = toCents(d.trim());
+        if (d.trim() && discountCents === undefined) return alert('Descuento inválido.');
+        try {
+          await api(`/admin/enrollments/${b.dataset.enrApprove}/approve`, { method: 'POST', body: discountCents ? { discountCents } : {} });
+          loadEnrollmentRequests(); loadGroups();
+        } catch (err) { alert(err.message); }
+      }));
+      box.querySelectorAll('[data-enr-reject]').forEach(b => b.addEventListener('click', async () => {
+        const notes = prompt('Motivo del rechazo (se enviará por correo):');
+        if (notes === null) return;
+        try { await api(`/admin/enrollments/${b.dataset.enrReject}/reject`, { method: 'POST', body: notes.trim() ? { notes: notes.trim() } : {} }); loadEnrollmentRequests(); loadGroups(); }
+        catch (err) { alert(err.message); }
+      }));
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  /* ----- Admin: vínculos apoderado–alumno ----- */
+  function guardianLinksBlock() {
+    return {
+      html: `<section class="panel-card"><div class="panel-card-head">
+          <h2><i class="fa-solid fa-people-roof" aria-hidden="true"></i> Vínculos apoderado–alumno</h2>
+          <select id="links-filter" class="input-sm" aria-label="Filtrar vínculos">
+            <option value="PENDING_ADMIN">Por aprobar</option>
+            <option value="PENDING_GUARDIAN">Esperando al apoderado</option>
+            <option value="APPROVED">Aprobados</option>
+          </select></div>
+        <div id="links-box"><p class="muted">Cargando…</p></div></section>`,
+      init() {
+        $('#links-filter').addEventListener('change', loadLinks);
+        loadLinks();
+      }
+    };
+  }
+
+  async function loadLinks() {
+    const box = $('#links-box');
+    if (!box) return;
+    const status = $('#links-filter').value;
+    try {
+      const list = await api(`/admin/guardian-links?status=${status}`);
+      if (!list.length) { box.innerHTML = '<p class="muted">No hay vínculos en este estado.</p>'; return; }
+      box.innerHTML = `<div class="table-wrap"><table class="table">
+        <thead><tr><th>Alumno</th><th>Apoderado</th><th>Consentimiento</th><th></th></tr></thead>
+        <tbody>${list.map(l => {
+          const [sl, st] = STATUS_LABEL[l.student.status] || [l.student.status, 'info'];
+          const guardianOk = l.guardian.status === 'ACTIVE' && l.guardian.isGuardian;
+          return `<tr>
+            <td><strong>${esc(l.student.fullName)}</strong> ${l.student.minor ? '<span class="badge">Menor</span>' : ''}<br>
+              <span class="muted">${esc(l.student.email || 'Usuario: ' + (l.student.username || ''))}${l.student.birthDate ? ' · Nac. ' + fmtDay(l.student.birthDate) : ''}</span><br>
+              <span class="status-pill st-${st}">Cuenta: ${sl}</span></td>
+            <td><strong>${esc(l.guardian.fullName)}</strong>${l.relationship ? ` <span class="muted">(${esc(l.relationship)})</span>` : ''}<br>
+              <span class="muted">${esc(l.guardian.email || '')}${l.guardian.phone ? ' · ' + esc(l.guardian.phone) : ''}${l.guardian.document ? ' · ' + esc(l.guardian.document) : ''}</span>
+              ${guardianOk ? '' : '<br><span class="status-pill st-warning">Cuenta de apoderado sin aprobar</span>'}</td>
+            <td class="muted">${l.consentAt ? fmtDate(l.consentAt) : '—'}</td>
+            <td class="actions">${l.status === 'PENDING_ADMIN' ? `<button class="btn btn-primary btn-xs" data-link-ok="${l.student.id}|${l.guardian.id}" ${guardianOk ? '' : 'disabled title="Aprueba primero la cuenta del apoderado"'}>Aprobar</button>` : ''}
+              <button class="btn btn-ghost btn-xs" data-link-no="${l.student.id}|${l.guardian.id}">${l.status === 'APPROVED' ? 'Anular' : 'Rechazar'}</button></td>
+          </tr>`;
+        }).join('')}</tbody></table></div>
+        <p class="muted small">Al aprobar un vínculo, si la cuenta del menor sigue pendiente, también queda aprobada como alumno.</p>`;
+      box.querySelectorAll('[data-link-ok]').forEach(b => b.addEventListener('click', async () => {
+        const [s, g] = b.dataset.linkOk.split('|');
+        try { await api(`/admin/guardian-links/${s}/${g}/approve`, { method: 'POST' }); loadLinks(); loadRequests(); }
+        catch (err) { alert(err.message); }
+      }));
+      box.querySelectorAll('[data-link-no]').forEach(b => b.addEventListener('click', async () => {
+        const reason = prompt('Motivo (se enviará al apoderado):');
+        if (reason === null) return;
+        const [s, g] = b.dataset.linkNo.split('|');
+        try { await api(`/admin/guardian-links/${s}/${g}/revoke`, { method: 'POST', body: reason.trim() ? { reason: reason.trim() } : {} }); loadLinks(); }
+        catch (err) { alert(err.message); }
+      }));
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  /* ----- Admin: prematrículas ----- */
+  function preEnrollmentsBlock() {
+    return {
+      html: `
+        <section class="panel-card">
+          <div class="panel-card-head">
+            <h2><i class="fa-solid fa-user-clock" aria-hidden="true"></i> Prematrículas</h2>
+            <button class="btn btn-primary btn-sm" id="new-pre-btn"><i class="fa-solid fa-plus"></i> Nueva prematrícula</button>
+          </div>
+          <p class="muted" style="margin-bottom:1rem">Registra a un alumno antes de que tenga cuenta. Le llegará un correo; al crear su cuenta con ese correo, la confirma y tú verificas la vinculación.</p>
+          <form id="pre-form" class="form-grid group-form" hidden novalidate>
+            <div class="field full"><label for="pre-group">Grupo</label><select id="pre-group" name="groupId" required></select></div>
+            <div class="field"><label for="pre-name">Nombres y apellidos</label><input id="pre-name" name="fullName" minlength="3" maxlength="120" required></div>
+            <div class="field"><label for="pre-email">Correo del alumno</label><input id="pre-email" name="email" type="email" required></div>
+            <div class="field"><label for="pre-phone">Celular <span class="muted">(opcional)</span></label><input id="pre-phone" name="phone" type="tel" pattern="[0-9 +]{9,15}"></div>
+            <div class="field"><label for="pre-birth">Fecha de nacimiento <span class="muted">(opcional)</span></label><input id="pre-birth" name="birthDate" type="date"></div>
+            <div class="field"><label for="pre-disc">Descuento en soles <span class="muted">(opcional)</span></label><input id="pre-disc" name="discount" inputmode="decimal" placeholder="0"></div>
+            <div class="field"><label for="pre-notes">Notas <span class="muted">(opcional)</span></label><input id="pre-notes" name="notes" maxlength="500"></div>
+            <div class="full"><button class="btn btn-primary" type="submit">Registrar</button> <button class="btn btn-ghost" type="button" id="cancel-pre">Cancelar</button></div>
+            <div class="alert full" id="pre-msg" hidden></div>
+          </form>
+          <div id="pre-box"><p class="muted">Cargando…</p></div>
+        </section>`,
+      init() {
+        const f = $('#pre-form');
+        $('#new-pre-btn').addEventListener('click', async () => {
+          f.hidden = !f.hidden;
+          if (!f.hidden) {
+            const groups = (await api('/admin/groups').catch(() => [])).filter(g => !['CANCELLED', 'FINISHED'].includes(g.status));
+            f.groupId.innerHTML = groups.length
+              ? groups.map(g => `<option value="${g.id}">${esc(g.course.name)} · ${esc(g.code)} · inicia ${fmtDay(g.startDate)}</option>`).join('')
+              : '<option value="">Primero crea un grupo</option>';
+          }
+        });
+        $('#cancel-pre').addEventListener('click', () => { f.hidden = true; });
+        f.addEventListener('submit', async e => {
+          e.preventDefault();
+          if (!f.reportValidity()) return;
+          const discountCents = toCents(f.discount.value.trim());
+          if (f.discount.value.trim() && discountCents === undefined) return showMsg($('#pre-msg'), 'danger', 'Descuento inválido.');
+          const body = { groupId: f.groupId.value, fullName: f.fullName.value.trim(), email: f.email.value.trim() };
+          if (f.phone.value.trim()) body.phone = f.phone.value.trim();
+          if (f.birthDate.value) body.birthDate = f.birthDate.value;
+          if (discountCents) body.discountCents = discountCents;
+          if (f.notes.value.trim()) body.notes = f.notes.value.trim();
+          setBusy(f, true);
+          try {
+            await api('/admin/pre-enrollments', { method: 'POST', body });
+            f.reset(); f.hidden = true;
+            loadPreEnrollments(); loadGroups();
+          } catch (err) { showMsg($('#pre-msg'), 'danger', esc(err.message)); }
+          finally { setBusy(f, false); }
+        });
+        loadPreEnrollments();
+      }
+    };
+  }
+
+  async function loadPreEnrollments() {
+    const box = $('#pre-box');
+    if (!box) return;
+    try {
+      const list = await api('/admin/pre-enrollments');
+      if (!list.length) { box.innerHTML = '<p class="muted">No hay prematrículas en curso.</p>'; return; }
+      box.innerHTML = `<div class="table-wrap"><table class="table">
+        <thead><tr><th>Persona</th><th>Curso / grupo</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${list.map(p => `<tr>
+          <td><strong>${esc(p.fullName)}</strong><br><span class="muted">${esc(p.email)}${p.phone ? ' · ' + esc(p.phone) : ''}</span>
+            ${p.discountCents ? `<br><span class="muted small">Descuento ${soles(p.discountCents)}</span>` : ''}${p.notes ? `<br><span class="muted small">${esc(p.notes)}</span>` : ''}</td>
+          <td>${esc(p.course)}<br><span class="muted">${esc(p.group.code)} · inicia ${fmtDay(p.group.startDate)}</span></td>
+          <td>${pill(PRE_STATUS[p.status])}
+            ${p.claimedBy ? `<br><span class="small">Por: ${esc(p.claimedBy.fullName)} (${esc(p.claimedBy.email || '')})</span>` : ''}
+            ${p.existingAccount ? `<br><span class="small muted">Ya existe la cuenta: ${esc(p.existingAccount.fullName)}</span>` : ''}</td>
+          <td class="actions">
+            ${p.status === 'CLAIMED' ? `<button class="btn btn-primary btn-xs" data-pre-ok="${p.id}">Confirmar</button> <button class="btn btn-ghost btn-xs" data-pre-no="${p.id}">No es</button>` : ''}
+            ${p.status === 'PENDING' && p.existingAccount ? `<button class="btn btn-primary btn-xs" data-pre-link="${p.id}" data-user="${p.existingAccount.id}" data-name="${esc(p.existingAccount.fullName)}">Vincular</button>` : ''}
+            ${p.status === 'PENDING' ? `<button class="btn btn-ghost btn-xs" data-pre-search="${p.id}">Vincular a otra cuenta…</button>` : ''}
+            <button class="btn btn-ghost btn-xs" data-pre-cancel="${p.id}">Anular</button></td>
+        </tr>`).join('')}</tbody></table></div>
+        <p class="muted small">"Vincular" crea la matrícula aprobada. Si la cuenta seguía pendiente, queda aprobada como alumno.</p>`;
+
+      const run = async fn => { try { await fn(); loadPreEnrollments(); loadGroups(); loadRequests(); } catch (err) { alert(err.message); } };
+      box.querySelectorAll('[data-pre-ok]').forEach(b => b.addEventListener('click', () => run(() => api(`/admin/pre-enrollments/${b.dataset.preOk}/approve-claim`, { method: 'POST' }))));
+      box.querySelectorAll('[data-pre-no]').forEach(b => b.addEventListener('click', () => {
+        const notes = prompt('Motivo (se enviará a quien la reclamó):');
+        if (notes !== null) run(() => api(`/admin/pre-enrollments/${b.dataset.preNo}/reject-claim`, { method: 'POST', body: notes.trim() ? { notes: notes.trim() } : {} }));
+      }));
+      box.querySelectorAll('[data-pre-link]').forEach(b => b.addEventListener('click', () => {
+        if (confirm(`¿Vincular a la cuenta de ${b.dataset.name} y crear la matrícula?`)) run(() => api(`/admin/pre-enrollments/${b.dataset.preLink}/link`, { method: 'POST', body: { userId: b.dataset.user } }));
+      }));
+      box.querySelectorAll('[data-pre-search]').forEach(b => b.addEventListener('click', async () => {
+        const q = prompt('Escribe el correo, usuario o nombre de la cuenta a vincular:');
+        if (!q || !q.trim()) return;
+        const users = (await api(`/admin/users?q=${encodeURIComponent(q.trim())}`).catch(() => []))
+          .filter(u => ['ACTIVE', 'PENDING_APPROVAL'].includes(u.status));
+        if (!users.length) return alert('No hay cuentas activas o pendientes que coincidan.');
+        if (users.length > 1) return alert(`Hay ${users.length} cuentas que coinciden. Escribe el correo completo.`);
+        const u = users[0];
+        if (confirm(`¿Vincular a ${u.fullName} (${u.email || u.username})?`)) run(() => api(`/admin/pre-enrollments/${b.dataset.preSearch}/link`, { method: 'POST', body: { userId: u.id } }));
+      }));
+      box.querySelectorAll('[data-pre-cancel]').forEach(b => b.addEventListener('click', () => {
+        if (confirm('¿Anular esta prematrícula?')) run(() => api(`/admin/pre-enrollments/${b.dataset.preCancel}/cancel`, { method: 'POST' }));
+      }));
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  /* ----- Admin: cursos y temario ----- */
+  function coursesBlock() {
+    return {
+      html: `<section class="panel-card">
+          <h2><i class="fa-solid fa-book" aria-hidden="true"></i> Cursos y temario</h2>
+          <div id="courses-box"><p class="muted">Cargando…</p></div>
+          <div id="course-edit"></div></section>`,
+      init: loadCourses
+    };
+  }
+
+  async function loadCourses() {
+    const box = $('#courses-box');
+    if (!box) return;
+    try {
+      const list = await api('/admin/courses');
+      box.innerHTML = `<div class="table-wrap"><table class="table">
+        <thead><tr><th>Curso</th><th>Línea</th><th>Precio</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${list.map(c => `<tr>
+          <td><strong>${esc(c.name)}</strong></td>
+          <td class="muted">${c.line === 'KIDS_TEENS' ? `Kids &amp; Teens · nivel ${c.level}` : 'Programa'}</td>
+          <td>${soles(c.priceCents)}</td>
+          <td>${pill(COURSE_STATUS[c.status] || [c.status, 'info'])}</td>
+          <td class="actions"><button class="btn btn-ghost btn-xs" data-edit-course="${c.id}">Editar</button></td>
+        </tr>`).join('')}</tbody></table></div>`;
+      box.querySelectorAll('[data-edit-course]').forEach(b => b.addEventListener('click', () => editCourse(b.dataset.editCourse)));
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  async function editCourse(id) {
+    const holder = $('#course-edit');
+    holder.innerHTML = '<p class="muted">Cargando…</p>';
+    try {
+      const c = await api(`/admin/courses/${id}`);
+      holder.innerHTML = `
+        <form id="course-form" class="form-grid group-detail" novalidate>
+          <div class="panel-card-head full"><h3>Editar: ${esc(c.name)}</h3><button class="btn btn-ghost btn-xs" type="button" id="close-course">Cerrar</button></div>
+          <div class="field"><label for="cf-name">Nombre</label><input id="cf-name" name="name" value="${esc(c.name)}" minlength="2" maxlength="80" required></div>
+          <div class="field"><label for="cf-price">Precio (S/)</label><input id="cf-price" name="price" inputmode="decimal" value="${(c.priceCents / 100).toFixed(2).replace(/\.00$/, '')}" required></div>
+          <div class="field"><label for="cf-status">Estado</label><select id="cf-status" name="status">${Object.entries(COURSE_STATUS).map(([v, [l]]) => `<option value="${v}" ${v === c.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+          <div class="field"><label>Duración</label><input value="${c.totalHours} horas" disabled></div>
+          <div class="field full"><label for="cf-summary">Resumen</label><textarea id="cf-summary" name="summary" minlength="10" maxlength="400" required>${esc(c.summary)}</textarea></div>
+          <div class="field full"><label for="cf-obj">Objetivo</label><textarea id="cf-obj" name="objective" maxlength="1000">${esc(c.objective || '')}</textarea></div>
+          <div class="field full"><label for="cf-aud">Dirigido a</label><textarea id="cf-aud" name="audience" maxlength="1000">${esc(c.audience || '')}</textarea></div>
+          <div class="field full"><label for="cf-req">Requisitos <span class="muted">(uno por línea)</span></label><textarea id="cf-req" name="requirements">${esc(c.requirements.join('\n'))}</textarea></div>
+          <div class="field full"><label for="cf-mod">Temario: módulos <span class="muted">(uno por línea, en orden)</span></label><textarea id="cf-mod" name="modules" rows="8">${esc(c.modules.map(m => m.title).join('\n'))}</textarea></div>
+          <p class="full muted small">El nuevo precio aplica solo a matrículas nuevas. Por ahora, la página pública del portal muestra su propio texto (se conectará a estos datos más adelante); el temario editado aquí se ve en el campus.</p>
+          <div class="full"><button class="btn btn-primary" type="submit">Guardar curso</button></div>
+          <div class="alert full" id="course-msg" hidden></div>
+        </form>`;
+      const f = $('#course-form');
+      $('#close-course').addEventListener('click', () => { holder.innerHTML = ''; });
+      f.addEventListener('submit', async e => {
+        e.preventDefault();
+        if (!f.reportValidity()) return;
+        const priceCents = toCents(f.price.value.trim());
+        if (priceCents === undefined) return showMsg($('#course-msg'), 'danger', 'Precio inválido.');
+        const lines = v => v.split('\n').map(s => s.trim()).filter(Boolean);
+        setBusy(f, true);
+        try {
+          await api(`/admin/courses/${id}`, {
+            method: 'PATCH',
+            body: {
+              name: f.name.value.trim(), priceCents, status: f.status.value, summary: f.summary.value.trim(),
+              objective: f.objective.value, audience: f.audience.value,
+              requirements: lines(f.requirements.value), modules: lines(f.modules.value)
+            }
+          });
+          showMsg($('#course-msg'), 'success', 'Curso guardado.');
+          loadCourses();
+        } catch (err) { showMsg($('#course-msg'), 'danger', esc(err.message)); }
+        finally { setBusy(f, false); }
+      });
+      holder.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) { holder.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
   }
 
   /* ----- Formas de ingreso (vincular Google / Microsoft) ----- */
@@ -462,13 +1120,6 @@
     holder.innerHTML = `<h2><i class="fa-solid fa-key" aria-hidden="true"></i> Formas de ingreso</h2><ul class="method-list">${rows.join('')}</ul>`;
   }
 
-  function placeholderBlock(icon, title, text) {
-    return {
-      html: `<section class="panel-card"><h2><i class="fa-solid ${icon}" aria-hidden="true"></i> ${title}</h2>
-        <div class="empty-state"><p>${text}</p><span class="badge badge-muted">Próxima etapa</span></div></section>`
-    };
-  }
-
   /* ----- Usuario pendiente: solicitar perfil ----- */
   async function renderPending(body) {
     let requests = [];
@@ -477,13 +1128,17 @@
     const lastRejected = requests.find(r => r.status === 'REJECTED');
 
     if (pending) {
-      body.innerHTML = `<section class="panel-card"><h2><i class="fa-solid fa-hourglass-half"></i> Solicitud en revisión</h2>
+      body.innerHTML = `<div id="claim-holder"></div><section class="panel-card"><h2><i class="fa-solid fa-hourglass-half"></i> Solicitud en revisión</h2>
         <p class="muted">Pediste acceso como <strong>${ROLE_LABEL[pending.requestedRole]}</strong> el ${fmtDate(pending.createdAt)}.
-        Te avisaremos por correo cuando sea aprobada.</p></section>`;
+        Te avisaremos por correo cuando sea aprobada.</p></section>
+        ${pending.requestedRole === 'STUDENT' ? '<section class="panel-card" id="my-guardians"></section>' : ''}`;
+      renderClaims($('#claim-holder'));
+      if (pending.requestedRole === 'STUDENT') await renderMyGuardians($('#my-guardians'));
       return;
     }
 
     body.innerHTML = `
+      <div id="claim-holder"></div>
       <section class="panel-card">
         <h2><i class="fa-solid fa-id-card" aria-hidden="true"></i> Completa tu solicitud</h2>
         ${lastRejected ? `<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation"></i><p>Tu solicitud anterior fue rechazada.${lastRejected.reviewNotes ? ' Motivo: ' + esc(lastRejected.reviewNotes) : ''}</p></div>` : ''}
@@ -497,6 +1152,9 @@
             </select></div>
           <div class="field"><label for="rq-phone">Celular</label><input id="rq-phone" name="phone" type="tel" pattern="[0-9 +]{9,15}" required></div>
           <div class="field" data-for="STUDENT"><label for="rq-birth">Fecha de nacimiento</label><input id="rq-birth" name="birthDate" type="date" required></div>
+          <div class="field full" id="rq-guardian" hidden><label for="rq-gmail">Correo de tu apoderado <span class="muted">(eres menor de edad)</span></label>
+            <input id="rq-gmail" name="guardianEmail" type="email" placeholder="Tu apoderado debe tener cuenta de Apoderado en el campus">
+            <span class="muted small">Si aún no tiene cuenta, puedes agregarlo después desde tu panel.</span></div>
           <div class="field" data-for="GUARDIAN" hidden><label for="rq-doctype">Tipo de documento</label>
             <select id="rq-doctype" name="documentType"><option value="DNI">DNI</option><option value="CE">Carné de extranjería</option><option value="PASAPORTE">Pasaporte</option></select></div>
           <div class="field" data-for="GUARDIAN" hidden><label for="rq-docnum">Número de documento</label><input id="rq-docnum" name="documentNumber" maxlength="20"></div>
@@ -505,6 +1163,7 @@
         </form>
       </section>`;
 
+    renderClaims($('#claim-holder'));
     const f = $('#request-form');
     const sync = () => {
       const role = f.role.value;
@@ -513,8 +1172,10 @@
         el.hidden = !on;
         el.querySelectorAll('input,select').forEach(i => { i.required = on && i.name !== 'documentType'; });
       });
+      $('#rq-guardian').hidden = !(role === 'STUDENT' && isMinorDate(f.birthDate.value));
     };
     f.role.addEventListener('change', sync);
+    f.birthDate.addEventListener('change', sync);
     sync();
 
     f.addEventListener('submit', async e => {
@@ -527,7 +1188,17 @@
       setBusy(f, true);
       try {
         await api('/account-requests', { method: 'POST', body: payload });
-        renderPending(body);
+        const gmail = role === 'STUDENT' && !$('#rq-guardian').hidden && f.guardianEmail.value.trim();
+        let warn = null;
+        if (gmail) {
+          try { await api('/me/guardians', { method: 'POST', body: { email: gmail } }); }
+          catch (err) { warn = err.message; }
+        }
+        await renderPending(body);
+        if (warn) {
+          const holder = $('#my-guardians');
+          if (holder) holder.insertAdjacentHTML('afterbegin', `<div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation"></i><p>Tu solicitud se envió, pero no pudimos agregar a tu apoderado: ${esc(warn)}</p></div>`);
+        }
       } catch (err) {
         showMsg($('#rq-msg'), 'danger', esc(err.message));
         setBusy(f, false);
@@ -536,7 +1207,7 @@
   }
 
   /* ----- Administrador ----- */
-  function adminBlock() {
+  function adminRequestsBlock() {
     return {
       html: `
         <section class="panel-card">
@@ -545,7 +1216,17 @@
             <button class="btn btn-ghost btn-sm" data-reload="requests"><i class="fa-solid fa-rotate"></i> Actualizar</button>
           </div>
           <div id="requests-box"><p class="muted">Cargando…</p></div>
-        </section>
+        </section>`,
+      init() {
+        loadRequests();
+        $('[data-reload="requests"]').addEventListener('click', loadRequests);
+      }
+    };
+  }
+
+  function usersBlock() {
+    return {
+      html: `
         <section class="panel-card">
           <div class="panel-card-head">
             <h2><i class="fa-solid fa-users" aria-hidden="true"></i> Usuarios</h2>
@@ -554,9 +1235,7 @@
           <div id="users-box"><p class="muted">Cargando…</p></div>
         </section>`,
       init() {
-        loadRequests();
         loadUsers();
-        $('[data-reload="requests"]').addEventListener('click', loadRequests);
         let t;
         $('#users-q').addEventListener('input', e => { clearTimeout(t); t = setTimeout(() => loadUsers(e.target.value), 300); });
       }
@@ -565,6 +1244,7 @@
 
   async function loadRequests() {
     const box = $('#requests-box');
+    if (!box) return;
     try {
       const list = await api('/admin/account-requests?status=PENDING');
       if (!list.length) { box.innerHTML = '<p class="muted">No hay solicitudes pendientes.</p>'; return; }
@@ -572,8 +1252,9 @@
         <thead><tr><th>Nombre</th><th>Correo</th><th>Solicita</th><th>Datos</th><th>Fecha</th><th></th></tr></thead>
         <tbody>${list.map(r => {
           const u = r.user;
-          const extra = r.requestedRole === 'STUDENT' && u.studentProfile && u.studentProfile.birthDate
-            ? `Nac.: ${fmtDate(u.studentProfile.birthDate)}`
+          const birth = u.studentProfile && u.studentProfile.birthDate;
+          const extra = r.requestedRole === 'STUDENT' && birth
+            ? `Nac.: ${fmtDate(birth)}${isMinorDate(birth.slice(0, 10)) ? ' <span class="badge">Menor</span> <span class="muted">(se aprueba con el vínculo del apoderado)</span>' : ''}`
             : r.requestedRole === 'GUARDIAN' && u.guardianProfile && u.guardianProfile.documentNumber
               ? `${esc(u.guardianProfile.documentType)} ${esc(u.guardianProfile.documentNumber)}` : '';
           return `<tr>
@@ -602,6 +1283,7 @@
       await api(`/admin/account-requests/${id}/${action}`, { method: 'POST', body: notes ? { notes } : {} });
       loadRequests();
       loadUsers($('#users-q').value);
+      loadLinks();
     } catch (err) {
       alert(err.message);
     }

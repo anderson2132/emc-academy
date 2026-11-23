@@ -927,7 +927,7 @@
           <h2>${esc(s.course)}${s.index ? ` · Clase ${s.index}` : ''}</h2>
           <p class="session-when"><i class="fa-regular fa-calendar"></i> ${dayLabel(s.date)} · ${fmtTime(s.startTime)} – ${fmtTime(s.endTime)}</p>
           <p>${pill(SESSION_STATUS[s.status])} ${pill([aLabel, aTone])}${s.markedAt ? ` <span class="muted small">marcada a las ${hhmm(new Date(s.markedAt))}</span>` : ''}</p>
-          ${s.status !== 'CANCELLED' && s.attendance === 'PENDING' && !canMark ? `<p class="muted small">Podrás marcar tu asistencia de ${hhmm(opens)} a ${hhmm(closes)}.</p>` : ''}
+          ${s.status !== 'CANCELLED' && s.attendance === 'PENDING' && !canMark ? `<p class="muted small">Podrás marcar tu asistencia de ${hhmm(opens)} a ${hhmm(closes)}</p>` : ''}
           <div class="session-actions">
             ${canMark ? `<button class="btn btn-primary" data-mark="${s.id}"><i class="fa-solid fa-hand"></i> Marcar mi asistencia</button>` : ''}
             ${s.zoomUrl && s.status !== 'CANCELLED' ? `<a class="btn btn-ghost" href="${esc(s.zoomUrl)}" target="_blank" rel="noopener"><i class="fa-solid fa-video"></i> Entrar a Zoom</a>` : ''}

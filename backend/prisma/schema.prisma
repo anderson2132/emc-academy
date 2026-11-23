@@ -125,6 +125,8 @@ enum AttendanceSource {
   STUDENT
   TEACHER
   SYSTEM
+  /// Registrado o corregido por el administrador.
+  ADMIN
 }
 
 enum PublishStatus {

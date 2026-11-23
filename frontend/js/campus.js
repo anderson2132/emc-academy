@@ -273,13 +273,17 @@
       });
     }
     if (has('TEACHER')) {
-      sections.push({ title: 'Docente', views: [{ id: 'mis-grupos', icon: 'fa-chalkboard-user', label: 'Mis grupos', blocks: () => [teacherBlock()] }] });
+      sections.push({ title: 'Docente', views: [
+        { id: 'calendario-docente', icon: 'fa-calendar-days', label: 'Mi calendario', blocks: () => [teacherCalendarBlock()] },
+        { id: 'mis-grupos', icon: 'fa-chalkboard-user', label: 'Mis grupos', blocks: () => [teacherBlock()] }
+      ] });
     }
     // La matrícula la hace SOLO el administrador (grupo → "Matricular alumno", o prematrícula).
     if (has('STUDENT')) {
       sections.push({
         title: 'Alumno',
         views: [
+          { id: 'mi-calendario', icon: 'fa-calendar-days', label: 'Mi calendario y asistencia', blocks: () => [studentCalendarBlock()] },
           { id: 'mis-cursos', icon: 'fa-book-open', label: 'Mis cursos', blocks: () => [claimBlock(), studentBlock()] },
           { id: 'mi-apoderado', icon: 'fa-people-roof', label: 'Mi apoderado', blocks: () => [myGuardiansBlock()] }
         ]
@@ -290,6 +294,7 @@
         title: 'Apoderado',
         views: [
           { id: 'mis-hijos', icon: 'fa-children', label: 'Mis hijos', blocks: () => [childrenBlock()] },
+          { id: 'calendario-hijos', icon: 'fa-calendar-days', label: 'Calendario y asistencia', blocks: () => [childCalendarBlock()] },
           { id: 'registrar-hijo', icon: 'fa-user-plus', label: 'Registrar a mi hijo/a', blocks: () => [createChildBlock()] }
         ]
       });
@@ -595,6 +600,8 @@
     } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
   }
 
+  let groupTab = 'alumnos';
+
   async function openGroup(id) {
     const box = $('#group-detail');
     box.innerHTML = '<p class="muted">Cargando grupo…</p>';
@@ -619,8 +626,14 @@
           <p class="muted">${pill(GROUP_STATUS[g.status] || [g.status, 'info'])} ${fmtDay(g.startDate)} – ${fmtDay(g.endDate)}${g.schedule ? ' · ' + esc(g.schedule) : ''} · Pago hasta ${new Date(g.paymentDueDate).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}${g.zoomUrl ? ` · <a href="${esc(g.zoomUrl)}" target="_blank" rel="noopener">Zoom</a>` : ''}</p>
           ${g.pendingRequests ? `<p class="small"><span class="status-pill st-warning">${g.pendingRequests} solicitud${g.pendingRequests === 1 ? '' : 'es'} de matrícula por revisar</span> (ver "Solicitudes de matrícula")</p>` : ''}
 
-          <details class="edit-box">
-            <summary><i class="fa-solid fa-pen" aria-hidden="true"></i> Editar grupo</summary>
+          <div class="gtabs" role="tablist" aria-label="Secciones del grupo">
+            <button role="tab" data-gtab="alumnos"><i class="fa-solid fa-user-graduate" aria-hidden="true"></i> Alumnos y pagos</button>
+            <button role="tab" data-gtab="clases"><i class="fa-regular fa-calendar" aria-hidden="true"></i> Clases</button>
+            <button role="tab" data-gtab="asistencia"><i class="fa-solid fa-clipboard-check" aria-hidden="true"></i> Asistencia</button>
+            <button role="tab" data-gtab="editar"><i class="fa-solid fa-pen" aria-hidden="true"></i> Editar grupo</button>
+          </div>
+
+          <div class="gpane" data-gpane="editar" hidden>
             <form id="ge-form" class="form-grid" novalidate>
               <div class="field"><label for="ge-start">Inicio</label><input id="ge-start" name="startDate" type="date" value="${g.startDate}" required></div>
               <div class="field"><label for="ge-end">Fin</label><input id="ge-end" name="endDate" type="date" value="${g.endDate}" required></div>
@@ -632,8 +645,12 @@
               <div class="full"><button class="btn btn-primary btn-sm" type="submit">Guardar cambios</button>
                 <button class="btn btn-ghost btn-sm btn-danger-ghost" type="button" id="ge-delete"><i class="fa-solid fa-trash" aria-hidden="true"></i> Eliminar grupo</button></div>
             </form>
-          </details>
+          </div>
 
+          <div class="gpane" data-gpane="clases" hidden><div id="gs-box"><p class="muted">Cargando clases…</p></div></div>
+          <div class="gpane" data-gpane="asistencia" hidden><div id="ga-box"><p class="muted">Cargando asistencia…</p></div></div>
+
+          <div class="gpane" data-gpane="alumnos" hidden>
           <h4><i class="fa-solid fa-chalkboard-user"></i> Docentes</h4>
           <ul class="chip-list">${g.teachers.map(t => `<li>${esc(t.fullName)} <button class="link-btn" data-rm-teacher="${t.id}" aria-label="Quitar ${esc(t.fullName)}">✕</button></li>`).join('') || '<li class="muted">Sin docentes asignados</li>'}</ul>
           <div class="assign-row">
@@ -668,8 +685,20 @@
 
           <h4><i class="fa-solid fa-user-clock"></i> Prematrículas de este grupo (${g.preEnrollments.length})</h4>
           ${g.preEnrollments.length ? `<ul class="chip-list">${g.preEnrollments.map(p => `<li>${esc(p.fullName)} <span class="muted">${esc(p.email)}</span> ${pill(PRE_STATUS[p.status])}</li>`).join('')}</ul>` : '<p class="muted">Sin prematrículas. Regístralas en el bloque "Prematrículas".</p>'}
+          </div>
           <div class="alert" id="gd-msg" hidden></div>
         </div>`;
+
+      // Pestañas del grupo (se recuerda la última al recargar el detalle).
+      const tabs = box.querySelectorAll('[data-gtab]');
+      const showTab = name => {
+        groupTab = name;
+        tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.gtab === name)));
+        box.querySelectorAll('[data-gpane]').forEach(p => { p.hidden = p.dataset.gpane !== name; });
+        if (name === 'clases' || name === 'asistencia') loadGroupSessions(id, g, name);
+      };
+      tabs.forEach(t => t.addEventListener('click', () => showTab(t.dataset.gtab)));
+      showTab(groupTab);
 
       const act = async (fn) => { try { await fn(); consoleRefresh(); await loadGroups(); await openGroup(id); } catch (err) { showMsg($('#gd-msg'), 'danger', esc(err.message)); } };
       $('#close-group').addEventListener('click', () => { box.innerHTML = ''; });
@@ -791,6 +820,418 @@
         catch (err) { showMsg(wrap.querySelector('#dz-msg'), 'danger', esc(err.message)); setBusy(f, false); submit.disabled = !matches(); }
       });
       f.confirm.focus();
+    });
+  }
+
+  /* ═════════════ Clases, calendario y asistencia ═════════════ */
+  const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  const ATT = {
+    PRESENT: ['Asistió', 'success', '✓'],
+    ABSENT: ['Falta', 'danger', '✗'],
+    JUSTIFIED: ['Justificada', 'info', 'J'],
+    PENDING: ['Por marcar', 'muted', '·'],
+    NOT_ENROLLED: ['Antes de su matrícula', 'muted', '–'],
+    CANCELLED: ['Clase cancelada', 'muted', '—']
+  };
+  const SESSION_STATUS = { SCHEDULED: ['Programada', 'info'], RESCHEDULED: ['Reprogramada', 'warning'], DONE: ['Dictada', 'success'], CANCELLED: ['Cancelada', 'muted'] };
+  const fmtTime = hhmm => { const [h, m] = hhmm.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h >= 12 ? 'p. m.' : 'a. m.'}`; };
+  const dayLabel = iso => { const t = new Date(`${iso}T12:00:00`).toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' }); return t.charAt(0).toUpperCase() + t.slice(1); };
+  const dayShort = iso => new Date(`${iso}T12:00:00`).toLocaleDateString('es-PE', { weekday: 'short', day: '2-digit', month: 'short' });
+  const pctTone = v => v == null ? 'muted' : v >= 85 ? 'success' : v >= 70 ? 'warning' : 'danger';
+  const pctPill = (v, suffix = 'asistencia') => pill([v == null ? 'Sin clases dictadas' : `${v}% ${suffix}`, pctTone(v)]);
+  /** Hoy en Lima (AAAA-MM-DD). */
+  const limaToday = () => new Date(Date.now() - 5 * 3600 * 1000).toISOString().slice(0, 10);
+
+  /**
+   * Calendario mensual reutilizable.
+   * events: [{ id, date: 'AAAA-MM-DD', startTime, title, sub, tone }] · onSelect(event)
+   * En pantallas angostas se muestra como agenda (lista) del mes.
+   */
+  function calendarWidget(container, events, { onSelect, focusDate } = {}) {
+    const start = focusDate || limaToday();
+    let y = Number(start.slice(0, 4)), m = Number(start.slice(5, 7)) - 1;
+    const byDate = {};
+    events.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+    Object.values(byDate).forEach(list => list.sort((a, b) => a.startTime.localeCompare(b.startTime)));
+    const today = limaToday();
+
+    const render = () => {
+      const first = new Date(Date.UTC(y, m, 1));
+      const offset = (first.getUTCDay() + 6) % 7; // lunes = 0
+      const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      const title = first.toLocaleDateString('es-PE', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+      const cells = [];
+      for (let i = 0; i < offset; i++) cells.push('<div class="cal-cell cal-empty"></div>');
+      const monthEvents = [];
+      for (let d = 1; d <= daysInMonth; d++) {
+        const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const list = byDate[iso] || [];
+        monthEvents.push(...list);
+        cells.push(`<div class="cal-cell${iso === today ? ' cal-today' : ''}"><span class="cal-day">${d}</span>
+          ${list.map(e => `<button class="cal-chip tone-${e.tone}" data-ev="${e.id}" title="${esc(e.title)} · ${fmtTime(e.startTime)}">
+            <span class="cal-time">${fmtTime(e.startTime)}</span> ${esc(e.title)}</button>`).join('')}</div>`);
+      }
+      container.innerHTML = `
+        <div class="cal">
+          <div class="cal-head">
+            <button class="btn btn-ghost btn-xs" data-cal="prev" aria-label="Mes anterior"><i class="fa-solid fa-chevron-left"></i></button>
+            <h3>${esc(title.charAt(0).toUpperCase() + title.slice(1))}</h3>
+            <button class="btn btn-ghost btn-xs" data-cal="next" aria-label="Mes siguiente"><i class="fa-solid fa-chevron-right"></i></button>
+            <button class="btn btn-ghost btn-xs" data-cal="today">Hoy</button>
+          </div>
+          <div class="cal-grid">${WEEKDAYS.map(w => `<div class="cal-wd">${w}</div>`).join('')}${cells.join('')}</div>
+          <ul class="cal-agenda">${monthEvents.length ? monthEvents.map(e => `<li><button class="cal-chip tone-${e.tone}" data-ev="${e.id}">
+              <strong>${dayShort(e.date)} · ${fmtTime(e.startTime)}</strong> ${esc(e.title)}${e.sub ? ` <span class="muted">${esc(e.sub)}</span>` : ''}</button></li>`).join('')
+            : '<li class="muted">Sin clases este mes.</li>'}</ul>
+        </div>`;
+      container.querySelector('[data-cal="prev"]').addEventListener('click', () => { m--; if (m < 0) { m = 11; y--; } render(); });
+      container.querySelector('[data-cal="next"]').addEventListener('click', () => { m++; if (m > 11) { m = 0; y++; } render(); });
+      container.querySelector('[data-cal="today"]').addEventListener('click', () => { y = Number(today.slice(0, 4)); m = Number(today.slice(5, 7)) - 1; render(); });
+      container.querySelectorAll('[data-ev]').forEach(b => b.addEventListener('click', () => {
+        const ev = events.find(e => e.id === b.dataset.ev);
+        if (ev && onSelect) onSelect(ev);
+      }));
+    };
+    render();
+  }
+
+  /** Primera clase no cancelada que aún no termina (o la última, si ya terminaron todas). */
+  const nextSession = list => {
+    const now = Date.now();
+    const live = list.filter(s => s.status !== 'CANCELLED').sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    return live.find(s => new Date(s.endsAt).getTime() > now) || null;
+  };
+  const windowOpen = s => { const now = Date.now(); return now >= new Date(s.attendanceOpensAt).getTime() && now <= new Date(s.attendanceClosesAt).getTime(); };
+
+  /* ----- Alumno: Mi calendario ----- */
+  function studentCalendarBlock() {
+    return { html: '<div id="scal"><p class="muted">Cargando…</p></div>', init: loadStudentCalendar };
+  }
+
+  async function loadStudentCalendar(selectedId) {
+    const box = $('#scal');
+    if (!box) return;
+    try {
+      const [cal, courses] = await Promise.all([api('/me/calendar'), api('/me/courses').catch(() => [])]);
+      const zoomOf = new Map(courses.map(c => [c.group.id, c.zoomUrl]));
+      const all = cal.courses.flatMap(c => c.sessions.map(s => ({ ...s, course: c.course.name, groupId: c.group.id, zoomUrl: zoomOf.get(c.group.id) || null })));
+      if (!cal.courses.length) { box.innerHTML = '<div class="panel-card"><p class="muted">Aún no tienes cursos matriculados.</p></div>'; return; }
+
+      const sessionCard = (s, heading) => {
+        const [aLabel, aTone] = ATT[s.attendance] || [s.attendance, 'info'];
+        const canMark = s.attendance === 'PENDING' && windowOpen(s);
+        const opens = new Date(s.attendanceOpensAt), closes = new Date(s.attendanceClosesAt);
+        const hhmm = d => d.toLocaleTimeString('es-PE', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Lima' });
+        return `<section class="panel-card session-card">
+          <span class="eyebrow">${heading}</span>
+          <h2>${esc(s.course)}${s.index ? ` · Clase ${s.index}` : ''}</h2>
+          <p class="session-when"><i class="fa-regular fa-calendar"></i> ${dayLabel(s.date)} · ${fmtTime(s.startTime)} – ${fmtTime(s.endTime)}</p>
+          <p>${pill(SESSION_STATUS[s.status])} ${pill([aLabel, aTone])}${s.markedAt ? ` <span class="muted small">marcada a las ${hhmm(new Date(s.markedAt))}</span>` : ''}</p>
+          ${s.status !== 'CANCELLED' && s.attendance === 'PENDING' && !canMark ? `<p class="muted small">Podrás marcar tu asistencia de ${hhmm(opens)} a ${hhmm(closes)}.</p>` : ''}
+          <div class="session-actions">
+            ${canMark ? `<button class="btn btn-primary" data-mark="${s.id}"><i class="fa-solid fa-hand"></i> Marcar mi asistencia</button>` : ''}
+            ${s.zoomUrl && s.status !== 'CANCELLED' ? `<a class="btn btn-ghost" href="${esc(s.zoomUrl)}" target="_blank" rel="noopener"><i class="fa-solid fa-video"></i> Entrar a Zoom</a>` : ''}
+          </div>
+          <div class="alert" data-mark-msg hidden></div>
+        </section>`;
+      };
+
+      const next = nextSession(all);
+      const selected = selectedId && all.find(s => s.id === selectedId);
+      box.innerHTML = `
+        <div class="stat-grid">${cal.courses.map(c => `
+          <div class="stat-card stat-static">
+            <i class="fa-solid fa-clipboard-check"></i>
+            <strong class="tone-text-${pctTone(c.stats.presentPct)}">${c.stats.presentPct == null ? '—' : c.stats.presentPct + '%'}</strong>
+            <span><strong>${esc(c.course.name)}</strong><br>${c.stats.present} asistencia${c.stats.present === 1 ? '' : 's'} · ${c.stats.absent} falta${c.stats.absent === 1 ? '' : 's'}${c.stats.justified ? ` · ${c.stats.justified} justificada${c.stats.justified === 1 ? '' : 's'}` : ''}${c.stats.absentPct != null ? `<br>${c.stats.absentPct}% de faltas` : ''}</span>
+          </div>`).join('')}</div>
+        <div id="scal-focus">${selected ? sessionCard(selected, 'Clase seleccionada') : next ? sessionCard(next, 'Próxima clase') : ''}</div>
+        <section class="panel-card"><div id="scal-grid"></div>
+          <p class="muted small">Marca tu asistencia desde 10 minutos antes hasta 10 minutos después del inicio de cada clase. Si no la marcas, cuenta como falta.</p></section>`;
+
+      const focus = selected || next;
+      calendarWidget($('#scal-grid'), all.map(s => ({
+        id: s.id, date: s.date, startTime: s.startTime, title: s.course, sub: s.index ? `Clase ${s.index}` : 'Cancelada',
+        tone: s.status === 'CANCELLED' ? 'muted' : (ATT[s.attendance] || [])[1] === 'muted' ? 'info' : ATT[s.attendance][1]
+      })), { focusDate: focus ? focus.date : undefined, onSelect: ev => { loadStudentCalendar(ev.id); } });
+
+      box.querySelectorAll('[data-mark]').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          await api(`/me/sessions/${b.dataset.mark}/attendance`, { method: 'POST' });
+          await loadStudentCalendar(b.dataset.mark);
+        } catch (err) {
+          const msg = b.closest('.session-card').querySelector('[data-mark-msg]');
+          showMsg(msg, 'danger', esc(err.message));
+          b.disabled = false;
+        }
+      }));
+
+      // Refresca cada 30 s mientras la vista esté abierta (abre/cierra la ventana de asistencia sin recargar).
+      clearTimeout(loadStudentCalendar.timer);
+      loadStudentCalendar.timer = setTimeout(() => { if ($('#scal')) loadStudentCalendar(selectedId); }, 30000);
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  /* ----- Docente: Mi calendario ----- */
+  function teacherCalendarBlock() {
+    return { html: '<div id="tcal"><p class="muted">Cargando…</p></div>', init: loadTeacherCalendar };
+  }
+
+  async function loadTeacherCalendar() {
+    const box = $('#tcal');
+    if (!box) return;
+    try {
+      const { groups } = await api('/me/teaching-calendar');
+      const all = groups.flatMap(g => g.sessions.map(s => ({ ...s, course: g.course, code: g.code, zoomUrl: g.zoomUrl })));
+      if (!all.length) { box.innerHTML = '<div class="panel-card"><p class="muted">Aún no hay clases programadas en tus grupos.</p></div>'; return; }
+      box.innerHTML = '<div id="tcal-focus"></div><section class="panel-card"><div id="tcal-grid"></div></section>';
+
+      const showDetail = async s => {
+        const holder = $('#tcal-focus');
+        const c = s.summary;
+        holder.innerHTML = `<section class="panel-card session-card">
+          <span class="eyebrow">${s === next ? 'Próxima clase' : 'Clase seleccionada'}</span>
+          <h2>${esc(s.course)}${s.index ? ` · Clase ${s.index}` : ''} <span class="muted">${esc(s.code)}</span></h2>
+          <p class="session-when"><i class="fa-regular fa-calendar"></i> ${dayLabel(s.date)} · ${fmtTime(s.startTime)} – ${fmtTime(s.endTime)}</p>
+          <p>${pill(SESSION_STATUS[s.status])} ${s.status !== 'CANCELLED' ? `${pill([`${c.present} asistieron`, 'success'])} ${pill([`${c.absent} faltas`, c.absent ? 'danger' : 'muted'])}${c.pending ? ' ' + pill([`${c.pending} por marcar`, 'muted']) : ''}` : ''}</p>
+          <div class="session-actions">
+            ${s.zoomUrl && s.status !== 'CANCELLED' ? `<a class="btn btn-primary btn-sm" href="${esc(s.zoomUrl)}" target="_blank" rel="noopener"><i class="fa-solid fa-video"></i> Abrir Zoom</a>` : ''}
+            ${s.status !== 'CANCELLED' ? `<button class="btn btn-ghost btn-sm" id="tcal-list">Ver lista de asistencia</button>` : ''}
+          </div>
+          <div id="tcal-roster"></div></section>`;
+        const btn = $('#tcal-list');
+        if (btn) btn.addEventListener('click', async () => {
+          const r = await api(`/me/teaching-sessions/${s.id}/attendance`).catch(err => ({ error: err.message }));
+          $('#tcal-roster').innerHTML = r.error ? `<p class="text-danger">${esc(r.error)}</p>` : r.students.length
+            ? `<div class="table-wrap"><table class="table"><thead><tr><th>Alumno</th><th>Esta clase</th><th>% asistencia</th></tr></thead>
+               <tbody>${r.students.map(st => `<tr><td>${esc(st.fullName)}</td><td>${pill(ATT[st.status])}</td><td>${pctPill(st.stats.presentPct, '')}</td></tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted">Sin alumnos matriculados.</p>';
+        });
+      };
+      const next = nextSession(all);
+      calendarWidget($('#tcal-grid'), all.map(s => ({
+        id: s.id, date: s.date, startTime: s.startTime, title: s.course, sub: `${s.code}${s.index ? ' · Clase ' + s.index : ''}`,
+        tone: s.status === 'CANCELLED' ? 'muted' : 'info'
+      })), { focusDate: next ? next.date : undefined, onSelect: ev => showDetail(all.find(s => s.id === ev.id)) });
+      if (next) showDetail(next);
+    } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+  }
+
+  /* ----- Apoderado: calendario y asistencia de sus hijos ----- */
+  function childCalendarBlock() {
+    return {
+      html: `<section class="panel-card"><div class="field"><label for="ccal-child">Hijo/a</label><select id="ccal-child"><option>Cargando…</option></select></div></section>
+        <div id="ccal"></div>`,
+      async init() {
+        const sel = $('#ccal-child');
+        const kids = (await api('/me/children').catch(() => [])).filter(k => k.linkStatus === 'APPROVED');
+        if (!kids.length) { sel.closest('.panel-card').innerHTML = '<p class="muted">Aún no tienes hijos con vínculo aprobado.</p>'; return; }
+        sel.innerHTML = kids.map(k => `<option value="${k.student.id}">${esc(k.student.fullName)}</option>`).join('');
+        const load = async () => {
+          const box = $('#ccal');
+          box.innerHTML = '<p class="muted">Cargando…</p>';
+          try {
+            const cal = await api(`/me/children/${sel.value}/calendar`);
+            if (!cal.courses.length) { box.innerHTML = '<div class="panel-card"><p class="muted">Sin cursos matriculados.</p></div>'; return; }
+            const all = cal.courses.flatMap(c => c.sessions.map(s => ({ ...s, course: c.course.name })));
+            box.innerHTML = `
+              <div class="stat-grid">${cal.courses.map(c => `<div class="stat-card stat-static"><i class="fa-solid fa-clipboard-check"></i>
+                <strong class="tone-text-${pctTone(c.stats.presentPct)}">${c.stats.presentPct == null ? '—' : c.stats.presentPct + '%'}</strong>
+                <span><strong>${esc(c.course.name)}</strong><br>${c.stats.present} asistencias · ${c.stats.absent} faltas${c.stats.justified ? ` · ${c.stats.justified} justificadas` : ''}</span></div>`).join('')}</div>
+              <div id="ccal-focus"></div>
+              <section class="panel-card"><div id="ccal-grid"></div></section>`;
+            const show = s => {
+              $('#ccal-focus').innerHTML = `<section class="panel-card session-card"><h2>${esc(s.course)}${s.index ? ` · Clase ${s.index}` : ''}</h2>
+                <p class="session-when"><i class="fa-regular fa-calendar"></i> ${dayLabel(s.date)} · ${fmtTime(s.startTime)} – ${fmtTime(s.endTime)}</p>
+                <p>${pill(SESSION_STATUS[s.status])} ${pill(ATT[s.attendance])}</p></section>`;
+            };
+            const next = nextSession(all);
+            calendarWidget($('#ccal-grid'), all.map(s => ({
+              id: s.id, date: s.date, startTime: s.startTime, title: s.course, sub: s.index ? `Clase ${s.index}` : '',
+              tone: s.status === 'CANCELLED' ? 'muted' : (ATT[s.attendance] || [])[1] === 'muted' ? 'info' : ATT[s.attendance][1]
+            })), { focusDate: next ? next.date : undefined, onSelect: ev => show(all.find(s => s.id === ev.id)) });
+            if (next) show(next);
+          } catch (err) { box.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; }
+        };
+        sel.addEventListener('change', load);
+        load();
+      }
+    };
+  }
+
+  /* ----- Admin: clases y asistencia de un grupo (pestañas del detalle) ----- */
+  async function loadGroupSessions(id, g, pane) {
+    const target = pane === 'clases' ? $('#gs-box') : $('#ga-box');
+    if (!target) return;
+    let data;
+    try { data = await api(`/admin/groups/${id}/sessions`); }
+    catch (err) { target.innerHTML = `<p class="text-danger">${esc(err.message)}</p>`; return; }
+    const run = async fn => {
+      try { await fn(); consoleRefresh(); loadGroups(); await loadGroupSessions(id, g, pane); return true; }
+      catch (err) { alert(err.message); return false; }
+    };
+    if (pane === 'clases') renderGroupClasses(target, id, g, data, run);
+    else renderGroupAttendance(target, data, run);
+  }
+
+  function renderGroupClasses(box, id, g, data, run) {
+    const { sessions, students } = data;
+    const count = sid => {
+      const st = students.map(s => s.statuses[sid]);
+      return { present: st.filter(x => x === 'PRESENT').length, absent: st.filter(x => x === 'ABSENT').length };
+    };
+    const live = sessions.filter(s => s.status !== 'CANCELLED');
+    const editor = `
+      <form id="gs-form" class="form-grid group-form" hidden novalidate>
+        <p class="full" id="gs-form-title"></p>
+        <div class="field"><label for="gs-date">Fecha</label><input id="gs-date" name="date" type="date" required></div>
+        <div class="field"><label for="gs-time">Hora de inicio</label><input id="gs-time" name="startTime" type="time" required></div>
+        <div class="field"><label for="gs-dur">Duración (minutos)</label><input id="gs-dur" name="durationMinutes" type="number" min="30" max="300" value="120" required></div>
+        <div class="full"><button class="btn btn-primary btn-sm" type="submit">Guardar</button> <button class="btn btn-ghost btn-sm" type="button" id="gs-cancel">Cancelar</button></div>
+      </form>`;
+
+    if (!sessions.length) {
+      box.innerHTML = `
+        <h4><i class="fa-regular fa-calendar-plus"></i> Programar las clases</h4>
+        <p class="muted">Elige los días y la hora. Se generan las clases a partir de la fecha indicada (por defecto, el inicio del grupo).</p>
+        <form id="gen-form" class="form-grid group-form" novalidate>
+          <fieldset class="field full weekday-pick"><legend>Días de clase</legend>
+            ${WEEKDAYS.map((w, i) => `<label><input type="checkbox" name="wd" value="${i + 1}"> ${w}</label>`).join('')}</fieldset>
+          <div class="field"><label for="gen-time">Hora de inicio</label><input id="gen-time" name="startTime" type="time" value="19:00" required></div>
+          <div class="field"><label for="gen-dur">Duración (minutos)</label><input id="gen-dur" name="durationMinutes" type="number" min="30" max="300" value="120" required></div>
+          <div class="field"><label for="gen-count">Cantidad de clases</label><input id="gen-count" name="count" type="number" min="1" max="60" value="16" required></div>
+          <div class="field"><label for="gen-from">Desde</label><input id="gen-from" name="fromDate" type="date" value="${g.startDate}" required></div>
+          <div class="full"><button class="btn btn-primary" type="submit"><i class="fa-solid fa-wand-magic-sparkles"></i> Generar clases</button></div>
+          <div class="alert full" id="gen-msg" hidden></div>
+        </form>`;
+      const f = $('#gen-form');
+      f.addEventListener('submit', async e => {
+        e.preventDefault();
+        const weekdays = [...f.querySelectorAll('[name="wd"]:checked')].map(c => Number(c.value));
+        if (!weekdays.length) return showMsg($('#gen-msg'), 'danger', 'Elige al menos un día de clase.');
+        if (!f.reportValidity()) return;
+        setBusy(f, true);
+        await run(() => api(`/admin/groups/${id}/sessions/generate`, {
+          method: 'POST',
+          body: { weekdays, startTime: f.startTime.value, durationMinutes: Number(f.durationMinutes.value), count: Number(f.count.value), fromDate: f.fromDate.value }
+        }));
+        setBusy(f, false);
+      });
+      return;
+    }
+
+    box.innerHTML = `
+      <div class="panel-card-head"><h4><i class="fa-regular fa-calendar"></i> ${live.length} clase${live.length === 1 ? '' : 's'} programada${live.length === 1 ? '' : 's'}${live.length ? ` · del ${fmtDay(live[0].date)} al ${fmtDay(live[live.length - 1].date)}` : ''}</h4>
+        <button class="btn btn-primary btn-xs" id="gs-add"><i class="fa-solid fa-plus"></i> Agregar clase</button></div>
+      ${editor}
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>N°</th><th>Fecha</th><th>Horario</th><th>Estado</th><th>Asistencia</th><th></th></tr></thead>
+        <tbody>${sessions.map(s => {
+          const c = count(s.id);
+          const past = Date.now() > new Date(s.attendanceClosesAt).getTime();
+          return `<tr class="${s.status === 'CANCELLED' ? 'row-muted' : ''}">
+            <td>${s.index || '—'}</td>
+            <td>${dayShort(s.date)}</td>
+            <td>${fmtTime(s.startTime)} – ${fmtTime(s.endTime)}</td>
+            <td>${pill(SESSION_STATUS[s.status])}</td>
+            <td>${s.status === 'CANCELLED' ? '' : past ? `<span class="att-mini ok">${c.present} ✓</span> <span class="att-mini bad">${c.absent} ✗</span>` : '<span class="muted small">por dictar</span>'}</td>
+            <td class="actions">
+              <button class="btn btn-ghost btn-xs" data-gs-edit="${s.id}">Reprogramar</button>
+              ${s.status === 'CANCELLED' ? `<button class="btn btn-ghost btn-xs" data-gs-restore="${s.id}">Restaurar</button>` : `<button class="btn btn-ghost btn-xs" data-gs-cancel="${s.id}">Cancelar</button>`}
+              <button class="btn btn-ghost btn-xs btn-danger-ghost" data-gs-del="${s.id}" aria-label="Eliminar clase"><i class="fa-solid fa-trash"></i></button>
+            </td></tr>`;
+        }).join('')}</tbody></table></div>
+      <p class="muted small">La fecha de fin del grupo se ajusta sola a la última clase. Una clase con asistencia registrada no se puede eliminar: cancélala.</p>`;
+
+    const f = $('#gs-form');
+    let editing = null;
+    const openForm = (session) => {
+      editing = session ? session.id : null;
+      $('#gs-form-title').innerHTML = session ? `Reprogramar <strong>clase ${session.index || ''}</strong> (${dayShort(session.date)})` : '<strong>Agregar una clase</strong>';
+      f.date.value = session ? session.date : limaToday();
+      f.startTime.value = session ? session.startTime : (live[0] ? live[0].startTime : '19:00');
+      f.durationMinutes.value = session ? Math.round((new Date(session.endsAt) - new Date(session.startsAt)) / 60000) : 120;
+      f.hidden = false;
+      f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    $('#gs-add').addEventListener('click', () => openForm(null));
+    $('#gs-cancel').addEventListener('click', () => { f.hidden = true; });
+    f.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!f.reportValidity()) return;
+      const body = { date: f.date.value, startTime: f.startTime.value, durationMinutes: Number(f.durationMinutes.value) };
+      await run(() => editing ? api(`/admin/sessions/${editing}`, { method: 'PATCH', body }) : api(`/admin/groups/${id}/sessions`, { method: 'POST', body }));
+    });
+    box.querySelectorAll('[data-gs-edit]').forEach(b => b.addEventListener('click', () => openForm(sessions.find(s => s.id === b.dataset.gsEdit))));
+    const withReason = (sid, action, question) => {
+      const reason = prompt(question);
+      if (!reason || reason.trim().length < 3) return;
+      run(() => api(`/admin/sessions/${sid}/${action}`, { method: 'POST', body: { reason: reason.trim() } }));
+    };
+    box.querySelectorAll('[data-gs-cancel]').forEach(b => b.addEventListener('click', () => withReason(b.dataset.gsCancel, 'cancel', 'Motivo de la cancelación (p. ej. feriado):')));
+    box.querySelectorAll('[data-gs-restore]').forEach(b => b.addEventListener('click', () => withReason(b.dataset.gsRestore, 'restore', 'Motivo para restaurar la clase:')));
+    box.querySelectorAll('[data-gs-del]').forEach(b => b.addEventListener('click', () => {
+      if (confirm('¿Eliminar esta clase del calendario?')) run(() => api(`/admin/sessions/${b.dataset.gsDel}`, { method: 'DELETE' }));
+    }));
+  }
+
+  function renderGroupAttendance(box, data, run) {
+    const { sessions, students } = data;
+    if (!sessions.length) { box.innerHTML = '<p class="muted">Primero programa las clases en la pestaña <strong>Clases</strong>.</p>'; return; }
+    if (!students.length) { box.innerHTML = '<p class="muted">Aún no hay alumnos matriculados.</p>'; return; }
+    const live = sessions.filter(s => s.status !== 'CANCELLED');
+    const dictadas = live.filter(s => Date.now() > new Date(s.attendanceClosesAt).getTime()).length;
+    const sorted = [...students].sort((a, b) => a.fullName.localeCompare(b.fullName));
+    const avg = (() => { const v = students.map(s => s.stats.presentPct).filter(x => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length * 10) / 10 : null; })();
+
+    box.innerHTML = `
+      <div class="panel-card-head"><h4><i class="fa-solid fa-chart-column"></i> Resumen de asistencia</h4>
+        <span class="muted">${dictadas} de ${live.length} clases dictadas · promedio del grupo ${pctPill(avg)}</span></div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Alumno</th><th>Asistencias</th><th>Faltas</th><th>Justificadas</th><th>% asistencia</th><th>% faltas</th></tr></thead>
+        <tbody>${sorted.map(s => `<tr>
+          <td>${esc(s.fullName)}</td><td>${s.stats.present}</td><td>${s.stats.absent}</td><td>${s.stats.justified}</td>
+          <td>${pctPill(s.stats.presentPct, '')}</td>
+          <td>${s.stats.absentPct == null ? '—' : `<span class="tone-text-${s.stats.absentPct > 30 ? 'danger' : s.stats.absentPct > 15 ? 'warning' : 'success'}">${s.stats.absentPct}%</span>`}</td>
+        </tr>`).join('')}</tbody></table></div>
+
+      <h4><i class="fa-solid fa-table-cells"></i> Detalle por clase</h4>
+      <p class="muted small">Haz clic en una casilla para corregirla (por ejemplo, justificar una falta). Las justificadas no cuentan como falta.</p>
+      <form id="ga-form" class="form-grid group-form" hidden novalidate>
+        <p class="full" id="ga-form-title"></p>
+        <div class="field"><label for="ga-status">Nuevo estado</label><select id="ga-status" name="status">
+          <option value="JUSTIFIED">Justificada</option><option value="PRESENT">Asistió</option><option value="ABSENT">Falta</option></select></div>
+        <div class="field"><label for="ga-reason">Motivo</label><input id="ga-reason" name="reason" minlength="3" maxlength="500" required placeholder="Ej.: certificado médico"></div>
+        <div class="full"><button class="btn btn-primary btn-sm" type="submit">Guardar</button> <button class="btn btn-ghost btn-sm" type="button" id="ga-cancel">Cancelar</button></div>
+      </form>
+      <div class="table-wrap"><table class="table att-matrix">
+        <thead><tr><th>Alumno</th>${live.map(s => `<th title="${dayShort(s.date)} ${fmtTime(s.startTime)}">${s.index}<br><span class="muted">${s.date.slice(8)}/${s.date.slice(5, 7)}</span></th>`).join('')}</tr></thead>
+        <tbody>${sorted.map(st => `<tr><td>${esc(st.fullName)}</td>${live.map(s => {
+          const v = st.statuses[s.id];
+          const [label, tone, sym] = ATT[v];
+          const editable = v !== 'NOT_ENROLLED' && v !== 'CANCELLED';
+          return `<td><button class="att-cell tone-${tone}" ${editable ? `data-ga="${s.id}|${st.id}"` : 'disabled'} title="${label}" aria-label="Clase ${s.index}, ${esc(st.fullName)}: ${label}">${sym}</button></td>`;
+        }).join('')}</tr>`).join('')}</tbody></table></div>
+      <p class="muted small att-legend">${['PRESENT', 'ABSENT', 'JUSTIFIED', 'PENDING', 'NOT_ENROLLED'].map(k => `<span class="att-cell tone-${ATT[k][1]}">${ATT[k][2]}</span> ${ATT[k][0]}`).join(' &nbsp; ')}</p>`;
+
+    const f = $('#ga-form');
+    let target = null;
+    box.querySelectorAll('[data-ga]').forEach(b => b.addEventListener('click', () => {
+      const [sid, uid] = b.dataset.ga.split('|');
+      target = { sid, uid };
+      const s = sessions.find(x => x.id === sid), st = students.find(x => x.id === uid);
+      $('#ga-form-title').innerHTML = `<strong>${esc(st.fullName)}</strong> · Clase ${s.index} (${dayShort(s.date)}) · ahora: ${ATT[st.statuses[sid]][0]}`;
+      f.status.value = st.statuses[sid] === 'JUSTIFIED' ? 'ABSENT' : 'JUSTIFIED';
+      f.reason.value = '';
+      f.hidden = false;
+      f.reason.focus();
+    }));
+    $('#ga-cancel').addEventListener('click', () => { f.hidden = true; });
+    f.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!f.reportValidity() || !target) return;
+      await run(() => api(`/admin/sessions/${target.sid}/attendance/${target.uid}`, { method: 'POST', body: { status: f.status.value, reason: f.reason.value.trim() } }));
     });
   }
 

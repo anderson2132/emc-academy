@@ -34,6 +34,17 @@ class ApiError extends Error {
   }
 }
 
+let refreshing = null;
+function refreshSession() {
+  if (!refreshing) {
+    refreshing = fetch(API_BASE + '/auth/refresh', { method: 'POST', credentials: 'include' })
+      .then(r => r.ok)
+      .catch(() => false)
+      .finally(() => { setTimeout(() => { refreshing = null; }, 0); });
+  }
+  return refreshing;
+}
+
 async function api(path, { method = 'GET', body } = {}, retry = true) {
   if (!API_BASE) {
     throw new ApiError('El Campus Virtual estará disponible próximamente. Mientras tanto, escríbenos por WhatsApp.', 0, 'NO_API');
@@ -51,9 +62,9 @@ async function api(path, { method = 'GET', body } = {}, retry = true) {
   }
 
   // Sesión vencida: intenta renovarla una vez y repite la petición.
+  // Una sola renovación a la vez: si varias peticiones vencen juntas, comparten la misma.
   if (res.status === 401 && retry && !NO_REFRESH.has(path)) {
-    const r = await fetch(API_BASE + '/auth/refresh', { method: 'POST', credentials: 'include' }).catch(() => null);
-    if (r && r.ok) return api(path, { method, body }, false);
+    if (await refreshSession()) return api(path, { method, body }, false);
   }
 
   let data = null;

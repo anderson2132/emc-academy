@@ -12,6 +12,8 @@ import { OidcError, OidcIdentity } from './oidc/oidc.service';
 
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MINUTES = 15;
+/** Reusar un refresh token ya rotado dentro de este margen no cierra todas las sesiones. */
+const REFRESH_REUSE_GRACE_MS = 60_000;
 const VERIFY_TTL_HOURS = 24;
 const RESET_TTL_HOURS = 1;
 
@@ -139,6 +141,9 @@ export class AuthService {
     if (!session) throw expired;
 
     if (session.revokedAt) {
+      // Carrera benigna: otra pestaña/petición acaba de rotar este mismo token.
+      // Solo se rechaza; no se trata como robo.
+      if (Date.now() - session.revokedAt.getTime() < REFRESH_REUSE_GRACE_MS) throw expired;
       await this.revokeAllSessions(session.userId);
       this.logger.warn(`Reutilización de refresh token detectada (usuario ${session.userId})`);
       await this.audit.log({ actorId: null, action: 'session.reuse_detected', entity: 'user', entityId: session.userId, ip: client.ip });
